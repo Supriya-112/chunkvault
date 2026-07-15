@@ -68,7 +68,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 ## Roadmap
 
 - [x] **M0** Project scaffold, CLI skeleton, CI
-- [ ] **M1** `backup`: walk files, chunk, hash, write to store
+- [x] **M1** `backup`: walk files, chunk, hash, write to store (with basic dedup)
 - [ ] **M2** `restore`: reassemble files and verify hashes
 - [ ] **M3** Backup → restore round-trip integration test
 - [ ] **M4** Content-defined chunking (rolling hash)

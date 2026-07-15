@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -28,12 +30,18 @@ func TestRestoreRequiresTwoArgs(t *testing.T) {
 	}
 }
 
-func TestBackupAcceptsOneArg(t *testing.T) {
-	out, err := runCmd("backup", "somedir")
+func TestBackupOnValidDir(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vaultDir := t.TempDir()
+
+	out, err := runCmd("backup", src, "--vault", vaultDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !bytes.Contains([]byte(out), []byte("somedir")) {
-		t.Fatalf("expected output to mention the source dir, got: %q", out)
+	if !bytes.Contains([]byte(out), []byte("snapshot")) {
+		t.Fatalf("expected a snapshot summary, got: %q", out)
 	}
 }

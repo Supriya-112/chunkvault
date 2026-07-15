@@ -1,19 +1,48 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
+
+	"github.com/Supriya-112/chunkvault/internal/vault"
 )
+
+var backupVault string
 
 var backupCmd = &cobra.Command{
 	Use:   "backup <source-dir>",
 	Short: "Back up a directory into the vault",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.Printf("backup: not implemented yet (arriving in milestone M1) — source: %s\n", args[0])
+		res, err := vault.Backup(args[0], backupVault, 0)
+		if err != nil {
+			return err
+		}
+		cmd.Printf("snapshot %s\n", res.SnapshotID)
+		cmd.Printf("  files:   %d\n", res.Files)
+		cmd.Printf("  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
+		cmd.Printf("  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
+			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.DedupRatio()*100)
 		return nil
 	},
 }
 
 func init() {
+	backupCmd.Flags().StringVar(&backupVault, "vault", "./vault", "path to the vault directory")
 	rootCmd.AddCommand(backupCmd)
+}
+
+// humanBytes formats a byte count in a human-readable form (e.g. 1.5 MiB).
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
