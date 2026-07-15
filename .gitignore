@@ -1,0 +1,15 @@
+# Compiled binary
+/chunkvault
+/bin/
+*.exe
+
+# Test / coverage artifacts
+*.out
+coverage.txt
+
+# Local dev vault + scratch data
+/testdata/vault/
+*.local
+
+# macOS
+.DS_Store
