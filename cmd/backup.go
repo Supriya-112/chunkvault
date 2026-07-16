@@ -19,10 +19,11 @@ var backupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		cmd.Printf("snapshot %s\n", res.SnapshotID)
-		cmd.Printf("  files:   %d\n", res.Files)
-		cmd.Printf("  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
-		cmd.Printf("  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "snapshot %s\n", res.SnapshotID)
+		fmt.Fprintf(out, "  files:   %d\n", res.Files)
+		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
+		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
 			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.DedupRatio()*100)
 		return nil
 	},

@@ -69,7 +69,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 
 - [x] **M0** Project scaffold, CLI skeleton, CI
 - [x] **M1** `backup`: walk files, chunk, hash, write to store (with basic dedup)
-- [ ] **M2** `restore`: reassemble files and verify hashes
+- [x] **M2** `restore`: reassemble files, verify chunk integrity, restore permissions
 - [ ] **M3** Backup → restore round-trip integration test
 - [ ] **M4** Content-defined chunking (rolling hash)
 - [ ] **M5** Deduplication + `stats` (dedup ratio, space saved)
