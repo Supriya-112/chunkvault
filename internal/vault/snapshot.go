@@ -1,11 +1,23 @@
 package vault
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// newSnapshotID returns a sortable, collision-resistant snapshot ID: a UTC
+// timestamp plus a short random suffix so two backups in the same second do
+// not clobber each other.
+func newSnapshotID() string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return time.Now().UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(b[:])
+}
 
 // FileEntry records one backed-up file and the ordered hashes of its chunks.
 type FileEntry struct {

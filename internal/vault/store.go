@@ -15,11 +15,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
-// Store is a content-addressable chunk store rooted at a directory.
+// Store is a content-addressable chunk store rooted at a directory. It is safe
+// for concurrent use by multiple goroutines.
 type Store struct {
 	root string
+
+	mu   sync.Mutex
+	seen map[string]bool // hashes known to be stored, so concurrent PutChunk calls write each chunk once
 }
 
 // Open opens (creating if needed) a vault at root.
@@ -29,7 +34,7 @@ func Open(root string) (*Store, error) {
 			return nil, fmt.Errorf("creating %s: %w", sub, err)
 		}
 	}
-	return &Store{root: root}, nil
+	return &Store{root: root, seen: map[string]bool{}}, nil
 }
 
 // chunkPath returns the on-disk path for a chunk, sharding by the first two
@@ -47,14 +52,36 @@ func (s *Store) HasChunk(hash string) bool {
 // PutChunk stores data under the hash of its contents and returns that hash.
 // wasNew is false when the chunk already existed — i.e. a deduplication hit.
 // The write is atomic: content goes to a temp file that is renamed into place.
+//
+// It is safe to call concurrently: a chunk is claimed under a lock before the
+// write, so exactly one caller writes any given chunk and reports wasNew.
 func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, err error) {
 	sum := sha256.Sum256(data)
 	hash = hex.EncodeToString(sum[:])
-
 	dst := s.chunkPath(hash)
-	if _, statErr := os.Stat(dst); statErr == nil {
-		return hash, false, nil // already have it — dedup
+
+	s.mu.Lock()
+	if s.seen[hash] {
+		s.mu.Unlock()
+		return hash, false, nil // another chunk with this content already handled it
 	}
+	if _, statErr := os.Stat(dst); statErr == nil {
+		s.seen[hash] = true
+		s.mu.Unlock()
+		return hash, false, nil // already on disk from a previous run — dedup
+	}
+	s.seen[hash] = true // claim it; we are the one writer
+	s.mu.Unlock()
+
+	// The write happens outside the lock so chunks store in parallel. On
+	// failure the claim is released so a retry can store the chunk.
+	defer func() {
+		if err != nil {
+			s.mu.Lock()
+			delete(s.seen, hash)
+			s.mu.Unlock()
+		}
+	}()
 
 	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", false, err

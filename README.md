@@ -44,8 +44,10 @@ go build -o chunkvault .
 ## Usage
 
 ```bash
-# Back up a directory into the vault
+# Back up a directory into the vault (chunks are hashed and stored in parallel;
+# --workers defaults to one per CPU, and Ctrl-C stops the run cleanly)
 chunkvault backup ./my-documents
+chunkvault backup ./my-documents --workers 4
 
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
@@ -76,7 +78,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 - [x] **M3** Backup → restore round-trip integration test
 - [x] **M4** Content-defined chunking (rolling hash)
 - [x] **M5** Deduplication + `stats` (dedup ratio, space saved)
-- [ ] **M6** Concurrent worker pool + cancellation
+- [x] **M6** Concurrent worker pool + cancellation
 - [ ] **M7** Incremental snapshots
 - [ ] **M8** Benchmarks
 - [ ] **M9** Compression

@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	backupRes, err := Backup(src, vaultDir, chunk.DefaultSize)
+	backupRes, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}

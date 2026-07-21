@@ -8,14 +8,17 @@ import (
 	"github.com/Supriya-112/chunkvault/internal/vault"
 )
 
-var backupVault string
+var (
+	backupVault   string
+	backupWorkers int
+)
 
 var backupCmd = &cobra.Command{
 	Use:   "backup <source-dir>",
 	Short: "Back up a directory into the vault",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		res, err := vault.Backup(args[0], backupVault, 0)
+		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers)
 		if err != nil {
 			return err
 		}
@@ -31,6 +34,7 @@ var backupCmd = &cobra.Command{
 
 func init() {
 	backupCmd.Flags().StringVar(&backupVault, "vault", "./vault", "path to the vault directory")
+	backupCmd.Flags().IntVar(&backupWorkers, "workers", 0, "number of chunk workers (0 = one per CPU)")
 	rootCmd.AddCommand(backupCmd)
 }
 

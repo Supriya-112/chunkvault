@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,7 +22,7 @@ func TestComputeStatsReportsDedup(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	if _, err := Backup(src, vaultDir, chunk.DefaultSize); err != nil {
+	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
