@@ -116,6 +116,34 @@ func TestSplitBoundariesAreStableUnderInsertion(t *testing.T) {
 	}
 }
 
+// TestSplitProgressesOnTinyAvgSize guards against a regression where an avgSize
+// small enough to make the minimum chunk size 0 produced zero-length cuts and
+// stalled Split. Every chunk must be non-empty and the input must reassemble.
+func TestSplitProgressesOnTinyAvgSize(t *testing.T) {
+	data := bytes.Repeat([]byte("abcdefgh"), 4096) // 32 KiB
+	for _, avg := range []int{1, 2, 3, 4} {
+		var got []byte
+		chunks := 0
+		err := Split(bytes.NewReader(data), avg, func(c []byte) error {
+			if len(c) == 0 {
+				t.Fatalf("avg=%d: zero-length chunk (no forward progress)", avg)
+			}
+			chunks++
+			if chunks > len(data) {
+				t.Fatalf("avg=%d: more chunks than bytes; Split is not advancing", avg)
+			}
+			got = append(got, c...)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("avg=%d: Split: %v", avg, err)
+		}
+		if !bytes.Equal(got, data) {
+			t.Fatalf("avg=%d: reassembled data does not match original", avg)
+		}
+	}
+}
+
 func TestSplitEmptyInput(t *testing.T) {
 	var chunks int
 	err := Split(bytes.NewReader(nil), 1024, func(c []byte) error {

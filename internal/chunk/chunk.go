@@ -89,8 +89,15 @@ func newChunker(avgSize int) chunker {
 	if b < 2 {
 		b = 2
 	}
+	min := avgSize / 4
+	if min < 1 {
+		// boundary() starts hashing at index min and returns a cut of at least
+		// min, so keeping min >= 1 guarantees every chunk makes forward progress
+		// (a zero-length cut would stall Split on tiny avgSize values).
+		min = 1
+	}
 	return chunker{
-		min:    avgSize / 4,
+		min:    min,
 		normal: avgSize,
 		max:    avgSize * 4,
 		maskS:  1<<uint(b+1) - 1,
