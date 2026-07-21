@@ -50,6 +50,9 @@ chunkvault backup ./my-documents
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
 
+# Show deduplication statistics for the vault
+chunkvault stats
+
 # Show version
 chunkvault --version
 ```
@@ -72,7 +75,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 - [x] **M2** `restore`: reassemble files, verify chunk integrity, restore permissions
 - [x] **M3** Backup → restore round-trip integration test
 - [x] **M4** Content-defined chunking (rolling hash)
-- [ ] **M5** Deduplication + `stats` (dedup ratio, space saved)
+- [x] **M5** Deduplication + `stats` (dedup ratio, space saved)
 - [ ] **M6** Concurrent worker pool + cancellation
 - [ ] **M7** Incremental snapshots
 - [ ] **M8** Benchmarks

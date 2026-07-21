@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Store is a content-addressable chunk store rooted at a directory.
@@ -71,4 +72,20 @@ func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, err error) {
 // GetChunk returns the contents of the chunk with the given hash.
 func (s *Store) GetChunk(hash string) ([]byte, error) {
 	return os.ReadFile(s.chunkPath(hash))
+}
+
+// ListSnapshots returns the IDs of every snapshot in the vault, sorted.
+func (s *Store) ListSnapshots() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(s.root, "snapshots"))
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		ids = append(ids, strings.TrimSuffix(e.Name(), ".json"))
+	}
+	return ids, nil
 }
