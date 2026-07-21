@@ -32,7 +32,7 @@ func (s Stats) DedupRatio() float64 {
 
 // ComputeStats scans a vault and reports its deduplication statistics.
 func ComputeStats(vaultDir string) (*Stats, error) {
-	store, err := Open(vaultDir)
+	store, err := openExisting(vaultDir)
 	if err != nil {
 		return nil, err
 	}

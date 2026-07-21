@@ -20,7 +20,7 @@ type RestoreResult struct {
 // permissions. Chunk contents are checked against their expected hash, so a
 // corrupted vault is detected rather than silently restored.
 func Restore(vaultDir, snapshotID, targetDir string) (*RestoreResult, error) {
-	store, err := Open(vaultDir)
+	store, err := openExisting(vaultDir)
 	if err != nil {
 		return nil, err
 	}
@@ -30,6 +30,20 @@ func Restore(vaultDir, snapshotID, targetDir string) (*RestoreResult, error) {
 	}
 
 	res := &RestoreResult{}
+
+	// Create directories first so empty ones survive the round-trip. Their
+	// recorded modes are applied at the end, once their contents exist, so a
+	// restrictive mode does not block writing the files inside them.
+	for _, de := range snap.Dirs {
+		dst, err := safeJoin(targetDir, de.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, fe := range snap.Files {
 		dst, err := safeJoin(targetDir, fe.Path)
 		if err != nil {
@@ -40,37 +54,52 @@ func Restore(vaultDir, snapshotID, targetDir string) (*RestoreResult, error) {
 		}
 		res.Files++
 	}
+
+	// Apply directory modes deepest-first, so tightening a parent's permissions
+	// never locks us out of a child we still need to chmod.
+	for i := len(snap.Dirs) - 1; i >= 0; i-- {
+		dst, err := safeJoin(targetDir, snap.Dirs[i].Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(dst, os.FileMode(snap.Dirs[i].Mode)); err != nil {
+			return nil, err
+		}
+	}
+
 	return res, nil
 }
 
-// restoreFile writes a single file entry from its chunks.
-func restoreFile(store *Store, dst string, fe FileEntry, res *RestoreResult) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+// restoreFile writes a single file entry from its chunks, verifying each
+// chunk's integrity against its hash before writing it.
+func restoreFile(store *Store, dst string, fe FileEntry, res *RestoreResult) (err error) {
+	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
 	f, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// Close once, surfacing a close error only if nothing else already failed.
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	for _, want := range fe.Chunks {
-		data, err := store.GetChunk(want)
-		if err != nil {
-			return err
+		data, gerr := store.GetChunk(want)
+		if gerr != nil {
+			return gerr
 		}
 		sum := sha256.Sum256(data)
 		if got := hex.EncodeToString(sum[:]); got != want {
 			return fmt.Errorf("chunk integrity check failed: want %s got %s", want, got)
 		}
-		if _, err := f.Write(data); err != nil {
-			return err
+		if _, werr := f.Write(data); werr != nil {
+			return werr
 		}
 		res.Bytes += int64(len(data))
-	}
-
-	if err := f.Close(); err != nil {
-		return err
 	}
 	return os.Chmod(dst, os.FileMode(fe.Mode))
 }

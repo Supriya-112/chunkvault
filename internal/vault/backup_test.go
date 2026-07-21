@@ -95,3 +95,58 @@ func TestBackupCancelled(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+// TestBackupStoreWriteErrorAborts makes chunk writes fail mid-run and asserts
+// the run aborts with an error and writes no snapshot. This exercises the
+// worker-error path: a failing PutChunk cancels the run and propagates the error
+// back through the collector.
+func TestBackupStoreWriteErrorAborts(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses filesystem permissions")
+	}
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "f.bin"), pseudoRandom(7, 200_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vaultDir := t.TempDir()
+	if _, err := Open(vaultDir); err != nil { // create chunks/ and snapshots/
+		t.Fatal(err)
+	}
+	chunksDir := filepath.Join(vaultDir, "chunks")
+	if err := os.Chmod(chunksDir, 0o555); err != nil { // read-only: writes fail
+		t.Fatal(err)
+	}
+	defer os.Chmod(chunksDir, 0o755) // restore so t.TempDir cleanup can remove it
+
+	if _, err := Backup(context.Background(), src, vaultDir, 4096, 4); err == nil {
+		t.Fatal("expected an error when the chunk store is not writable")
+	}
+	entries, err := os.ReadDir(filepath.Join(vaultDir, "snapshots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("no snapshot should be written on failure, found %d", len(entries))
+	}
+}
+
+// TestBackupUnreadableSourceFile asserts an unreadable source file surfaces an
+// error rather than being silently skipped.
+func TestBackupUnreadableSourceFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses filesystem permissions")
+	}
+	src := t.TempDir()
+	p := filepath.Join(src, "secret.bin")
+	if err := os.WriteFile(p, []byte("classified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(p, 0o644)
+
+	if _, err := Backup(context.Background(), src, t.TempDir(), 4096, 4); err == nil {
+		t.Fatal("expected an error backing up an unreadable file")
+	}
+}

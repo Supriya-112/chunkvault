@@ -70,6 +70,13 @@ snapshot = ordered list of chunk hashes per file  ◀─────────
 Restoring walks the snapshot's chunk list, pulls each chunk from the store by
 its hash, and streams the file back out — verifying integrity as it goes.
 
+## Limitations
+
+- **Regular files and directories only.** Directories (including empty ones) and
+  their permissions are preserved, but symlinks, devices, sockets, and other
+  non-regular files are skipped. Each `backup` run reports how many it skipped.
+  Storing symlinks is planned for a later milestone.
+
 ## Roadmap
 
 - [x] **M0** Project scaffold, CLI skeleton, CI

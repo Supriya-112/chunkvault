@@ -28,6 +28,9 @@ var backupCmd = &cobra.Command{
 		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
 		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
 			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.DedupRatio()*100)
+		if res.Skipped > 0 {
+			fmt.Fprintf(out, "  skipped: %d non-regular entries (symlinks, devices, etc.)\n", res.Skipped)
+		}
 		return nil
 	},
 }

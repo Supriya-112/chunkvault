@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 )
 
@@ -44,9 +45,6 @@ func TestPutGetRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
-	if !store.HasChunk(hash) {
-		t.Fatal("HasChunk returned false for a chunk we just stored")
-	}
 
 	got, err := store.GetChunk(hash)
 	if err != nil {
@@ -54,6 +52,44 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got, data) {
 		t.Fatalf("round-trip mismatch: got %q want %q", got, data)
+	}
+}
+
+// TestPutChunkConcurrentIdentical drives many goroutines storing identical
+// content at once and asserts exactly one reports wasNew — the store must write
+// each chunk once even under contention.
+func TestPutChunkConcurrentIdentical(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	data := bytes.Repeat([]byte("concurrent chunk"), 512)
+
+	const goroutines = 64
+	news := make([]bool, goroutines)
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, wasNew, err := store.PutChunk(data)
+			news[i], errs[i] = wasNew, err // distinct indices: no shared writes
+		}(i)
+	}
+	wg.Wait()
+
+	count := 0
+	for i := 0; i < goroutines; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: PutChunk: %v", i, errs[i])
+		}
+		if news[i] {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one writer to report wasNew, got %d", count)
 	}
 }
 

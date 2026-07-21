@@ -37,16 +37,19 @@ func Open(root string) (*Store, error) {
 	return &Store{root: root, seen: map[string]bool{}}, nil
 }
 
+// openExisting opens a vault that must already exist, so a mistyped path is
+// reported as an error instead of silently creating an empty vault.
+func openExisting(root string) (*Store, error) {
+	if _, err := os.Stat(root); err != nil {
+		return nil, fmt.Errorf("vault %q: %w", root, err)
+	}
+	return Open(root)
+}
+
 // chunkPath returns the on-disk path for a chunk, sharding by the first two
 // hex characters of its hash to avoid huge single directories.
 func (s *Store) chunkPath(hash string) string {
 	return filepath.Join(s.root, "chunks", hash[:2], hash)
-}
-
-// HasChunk reports whether a chunk with the given hash is already stored.
-func (s *Store) HasChunk(hash string) bool {
-	_, err := os.Stat(s.chunkPath(hash))
-	return err == nil
 }
 
 // PutChunk stores data under the hash of its contents and returns that hash.

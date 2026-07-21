@@ -57,3 +57,10 @@ func TestComputeStatsEmptyVault(t *testing.T) {
 		t.Errorf("dedup ratio of an empty vault = %v, want 0", st.DedupRatio())
 	}
 }
+
+func TestComputeStatsVaultNotFound(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if _, err := ComputeStats(missing); err == nil {
+		t.Fatal("expected an error computing stats for a nonexistent vault")
+	}
+}

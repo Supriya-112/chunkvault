@@ -16,6 +16,7 @@ import (
 type Result struct {
 	SnapshotID  string
 	Files       int
+	Skipped     int // non-regular entries not backed up (symlinks, devices, etc.)
 	TotalChunks int
 	NewChunks   int   // chunks actually written (not deduplicated)
 	TotalBytes  int64 // logical bytes read from the source
@@ -95,12 +96,13 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 		close(results)
 	}()
 
-	// The producer walks the tree, records file metadata into snap in walk
-	// order, and feeds each file's chunks into the pool.
+	// The producer walks the tree, records file and directory metadata into
+	// snap in walk order, and feeds each file's chunks into the pool.
+	var skipped int
 	produceErr := make(chan error, 1)
 	go func() {
 		defer close(jobs)
-		produceErr <- splitTree(ctx, jobs, sourceDir, chunkSize, snap)
+		produceErr <- splitTree(ctx, jobs, sourceDir, chunkSize, snap, &skipped)
 	}()
 
 	// Collect results (this goroutine is the only writer of res, so no locking
@@ -155,19 +157,18 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	}
 	res.SnapshotID = snap.ID
 	res.Files = len(snap.Files)
+	res.Skipped = skipped
 	return res, nil
 }
 
-// splitTree walks sourceDir, appends a manifest entry for each regular file, and
-// sends that file's chunks to jobs. It stops early and returns ctx.Err() if ctx
-// is cancelled.
-func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chunkSize int, snap *Snapshot) error {
+// splitTree walks sourceDir, records a manifest entry for each directory and
+// regular file, and sends each file's chunks to jobs. Non-regular entries
+// (symlinks, devices, etc.) are counted in *skipped rather than backed up. It
+// stops early and returns ctx.Err() if ctx is cancelled.
+func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chunkSize int, snap *Snapshot, skipped *int) error {
 	return filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
-		}
-		if d.IsDir() || !d.Type().IsRegular() {
-			return nil // skip directories, symlinks, devices, etc.
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -176,6 +177,17 @@ func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chun
 		rel, err := filepath.Rel(sourceDir, path)
 		if err != nil {
 			return err
+		}
+
+		if d.IsDir() {
+			if rel != "." { // "." is the target dir itself, created on restore
+				snap.Dirs = append(snap.Dirs, DirEntry{Path: rel, Mode: uint32(info.Mode())})
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			*skipped++ // symlinks, devices, sockets, etc. are not backed up
+			return nil
 		}
 
 		fileIdx := len(snap.Files)

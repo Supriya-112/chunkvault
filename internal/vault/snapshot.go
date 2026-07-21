@@ -27,10 +27,19 @@ type FileEntry struct {
 	Chunks []string `json:"chunks"` // ordered chunk hashes; concatenate to rebuild
 }
 
-// Snapshot is the manifest for one backup run.
+// DirEntry records one backed-up directory so empty directories survive a
+// round-trip and directory permissions are restored.
+type DirEntry struct {
+	Path string `json:"path"` // path relative to the backup source root
+	Mode uint32 `json:"mode"` // unix file mode bits
+}
+
+// Snapshot is the manifest for one backup run. Dirs is ordered parents-first
+// (WalkDir order), so restoring them in order recreates the tree.
 type Snapshot struct {
 	ID     string      `json:"id"`
 	Source string      `json:"source"`
+	Dirs   []DirEntry  `json:"dirs,omitempty"`
 	Files  []FileEntry `json:"files"`
 }
 
