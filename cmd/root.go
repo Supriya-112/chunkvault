@@ -21,6 +21,10 @@ storing only the unique ones, so unchanged data is never stored twice.
 
 It is a small, readable take on tools like restic and borg, built to
 demonstrate content-defined chunking, deduplication, and concurrent I/O.`,
+
+	// Execute prints errors itself, and a failing command shouldn't dump usage.
+	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 // Execute runs the root command and exits non-zero on error. The command
