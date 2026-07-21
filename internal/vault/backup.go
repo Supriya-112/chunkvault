@@ -16,6 +16,7 @@ import (
 type Result struct {
 	SnapshotID  string
 	Files       int
+	Reused      int // files reused unchanged from the parent snapshot (not re-read)
 	Skipped     int // non-regular entries not backed up (symlinks, devices, etc.)
 	TotalChunks int
 	NewChunks   int   // chunks actually written (not deduplicated)
@@ -71,6 +72,13 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	snap := &Snapshot{ID: newSnapshotID(), Source: sourceDir}
 	res := &Result{}
 
+	// Incremental backup: files unchanged since the most recent snapshot of the
+	// same source are reused without being re-read. A first backup has no parent.
+	parent, err := parentIndex(store, sourceDir)
+	if err != nil {
+		return nil, err
+	}
+
 	jobs := make(chan chunkJob)
 	results := make(chan chunkResult)
 
@@ -98,11 +106,11 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 
 	// The producer walks the tree, records file and directory metadata into
 	// snap in walk order, and feeds each file's chunks into the pool.
-	var skipped int
+	prod := &producer{ctx: ctx, jobs: jobs, source: sourceDir, chunkSize: chunkSize, snap: snap, parent: parent}
 	produceErr := make(chan error, 1)
 	go func() {
 		defer close(jobs)
-		produceErr <- splitTree(ctx, jobs, sourceDir, chunkSize, snap, &skipped)
+		produceErr <- prod.walk()
 	}()
 
 	// Collect results (this goroutine is the only writer of res, so no locking
@@ -157,16 +165,56 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	}
 	res.SnapshotID = snap.ID
 	res.Files = len(snap.Files)
-	res.Skipped = skipped
+	res.Reused = prod.reused
+	res.Skipped = prod.skipped
 	return res, nil
 }
 
-// splitTree walks sourceDir, records a manifest entry for each directory and
-// regular file, and sends each file's chunks to jobs. Non-regular entries
-// (symlinks, devices, etc.) are counted in *skipped rather than backed up. It
-// stops early and returns ctx.Err() if ctx is cancelled.
-func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chunkSize int, snap *Snapshot, skipped *int) error {
-	return filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
+// parentIndex returns the files of the most recent snapshot of source, keyed by
+// relative path, for incremental reuse. It returns nil (not an error) when no
+// prior snapshot of that source exists.
+func parentIndex(store *Store, source string) (map[string]FileEntry, error) {
+	ids, err := store.ListSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	// ListSnapshots is sorted oldest-first (IDs lead with a timestamp), so scan
+	// from the newest for one that backed up this same source.
+	for i := len(ids) - 1; i >= 0; i-- {
+		snap, err := store.LoadSnapshot(ids[i])
+		if err != nil {
+			return nil, err
+		}
+		if snap.Source != source {
+			continue
+		}
+		index := make(map[string]FileEntry, len(snap.Files))
+		for _, fe := range snap.Files {
+			index[fe.Path] = fe
+		}
+		return index, nil
+	}
+	return nil, nil
+}
+
+// producer walks the source tree, records directory and file metadata into
+// snap in walk order, and feeds each file's chunks into the worker pool. Files
+// unchanged since the parent snapshot are reused without being re-read.
+type producer struct {
+	ctx       context.Context
+	jobs      chan<- chunkJob
+	source    string
+	chunkSize int
+	snap      *Snapshot
+	parent    map[string]FileEntry // parent snapshot's files by relative path; nil if none
+
+	reused  int // files reused unchanged from the parent
+	skipped int // non-regular entries not backed up
+}
+
+// walk runs the tree walk. It stops early and returns ctx.Err() if cancelled.
+func (p *producer) walk() error {
+	return filepath.WalkDir(p.source, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -174,24 +222,35 @@ func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chun
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(sourceDir, path)
+		rel, err := filepath.Rel(p.source, path)
 		if err != nil {
 			return err
 		}
 
 		if d.IsDir() {
 			if rel != "." { // "." is the target dir itself, created on restore
-				snap.Dirs = append(snap.Dirs, DirEntry{Path: rel, Mode: uint32(info.Mode())})
+				p.snap.Dirs = append(p.snap.Dirs, DirEntry{Path: rel, Mode: uint32(info.Mode())})
 			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
-			*skipped++ // symlinks, devices, sockets, etc. are not backed up
+			p.skipped++ // symlinks, devices, sockets, etc. are not backed up
 			return nil
 		}
 
-		fileIdx := len(snap.Files)
-		snap.Files = append(snap.Files, FileEntry{Path: rel, Size: info.Size(), Mode: uint32(info.Mode())})
+		entry := FileEntry{Path: rel, Size: info.Size(), Mode: uint32(info.Mode()), ModTime: info.ModTime().UnixNano()}
+
+		// Incremental: if size and mtime match the parent snapshot, the content
+		// is unchanged, so reuse its chunk list instead of re-reading the file.
+		if prev, ok := p.parent[rel]; ok && prev.Size == entry.Size && prev.ModTime == entry.ModTime {
+			entry.Chunks = append([]string(nil), prev.Chunks...)
+			p.snap.Files = append(p.snap.Files, entry)
+			p.reused++
+			return nil
+		}
+
+		fileIdx := len(p.snap.Files)
+		p.snap.Files = append(p.snap.Files, entry)
 
 		f, err := os.Open(path)
 		if err != nil {
@@ -200,8 +259,8 @@ func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chun
 		defer f.Close()
 
 		index := 0
-		return chunk.Split(f, chunkSize, func(data []byte) error {
-			if err := ctx.Err(); err != nil {
+		return chunk.Split(f, p.chunkSize, func(data []byte) error {
+			if err := p.ctx.Err(); err != nil {
 				return err
 			}
 			// Split reuses its buffer once this returns, so copy before the
@@ -209,11 +268,11 @@ func splitTree(ctx context.Context, jobs chan<- chunkJob, sourceDir string, chun
 			buf := make([]byte, len(data))
 			copy(buf, data)
 			select {
-			case jobs <- chunkJob{file: fileIdx, index: index, data: buf}:
+			case p.jobs <- chunkJob{file: fileIdx, index: index, data: buf}:
 				index++
 				return nil
-			case <-ctx.Done():
-				return ctx.Err()
+			case <-p.ctx.Done():
+				return p.ctx.Err()
 			}
 		})
 	})

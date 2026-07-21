@@ -55,9 +55,10 @@ func TestRoundTripCLI(t *testing.T) {
 	assertTreesEqual(t, src, target)
 }
 
-// TestSecondBackupDeduplicates checks that backing up unchanged data a second
-// time stores no new chunks.
-func TestSecondBackupDeduplicates(t *testing.T) {
+// TestSecondBackupIsIncremental checks that a second backup of unchanged data
+// reuses files from the previous snapshot rather than re-reading them, storing
+// no new chunks.
+func TestSecondBackupIsIncremental(t *testing.T) {
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, "a.txt"), bytes.Repeat([]byte("x"), 4096), 0o644); err != nil {
 		t.Fatal(err)
@@ -71,8 +72,11 @@ func TestSecondBackupDeduplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second backup: %v", err)
 	}
+	if !strings.Contains(out, "reused:") {
+		t.Fatalf("expected the second backup to reuse unchanged files, got:\n%s", out)
+	}
 	if !strings.Contains(out, "0 new") {
-		t.Fatalf("expected second identical backup to store 0 new chunks, got:\n%s", out)
+		t.Fatalf("expected the second backup to store 0 new chunks, got:\n%s", out)
 	}
 }
 

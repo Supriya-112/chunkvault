@@ -1,12 +1,14 @@
 package vault
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // pseudoRandom returns n deterministic, well-mixed bytes so tests exercise
@@ -72,6 +74,77 @@ func TestBackupPreservesChunkOrderAcrossWorkers(t *testing.T) {
 			if got[i] != want[i] {
 				t.Fatalf("%s: byte %d differs after round-trip; chunk order not preserved", rel, i)
 			}
+		}
+	}
+}
+
+// TestBackupIncrementalReusesUnchangedFiles verifies that a second backup reuses
+// files unchanged since the previous snapshot (detected by size + mtime) and
+// only re-chunks what changed, while still restoring correctly.
+func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
+	src := t.TempDir()
+	stable := filepath.Join(src, "stable.bin")
+	changing := filepath.Join(src, "changing.bin")
+	if err := os.WriteFile(stable, pseudoRandom(1, 300_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changing, pseudoRandom(2, 300_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vaultDir := t.TempDir()
+	first, err := Backup(context.Background(), src, vaultDir, 4096, 4)
+	if err != nil {
+		t.Fatalf("first backup: %v", err)
+	}
+	if first.Reused != 0 {
+		t.Fatalf("first backup should reuse nothing, got %d", first.Reused)
+	}
+
+	// Change one file's content (same size) and bump its mtime; add a new file.
+	// stable.bin is left untouched.
+	if err := os.WriteFile(changing, pseudoRandom(3, 300_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bumped := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(changing, bumped, bumped); err != nil {
+		t.Fatal(err)
+	}
+	added := filepath.Join(src, "added.bin")
+	if err := os.WriteFile(added, pseudoRandom(4, 100_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := Backup(context.Background(), src, vaultDir, 4096, 4)
+	if err != nil {
+		t.Fatalf("second backup: %v", err)
+	}
+	if second.Reused != 1 {
+		t.Fatalf("expected 1 reused file (stable.bin), got %d", second.Reused)
+	}
+	if second.Files != 3 {
+		t.Fatalf("expected 3 files in the second snapshot, got %d", second.Files)
+	}
+	if second.TotalChunks == 0 {
+		t.Fatal("expected the changed and added files to be chunked")
+	}
+
+	// The second snapshot must restore correctly, including the reused file.
+	target := t.TempDir()
+	if _, err := Restore(vaultDir, second.SnapshotID, target); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	for _, name := range []string{"stable.bin", "changing.bin", "added.bin"} {
+		got, err := os.ReadFile(filepath.Join(target, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		want, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s: restored content differs from source", name)
 		}
 	}
 }

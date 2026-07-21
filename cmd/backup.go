@@ -25,6 +25,9 @@ var backupCmd = &cobra.Command{
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "snapshot %s\n", res.SnapshotID)
 		fmt.Fprintf(out, "  files:   %d\n", res.Files)
+		if res.Reused > 0 {
+			fmt.Fprintf(out, "  reused:  %d unchanged from the previous snapshot\n", res.Reused)
+		}
 		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
 		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
 			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.DedupRatio()*100)

@@ -26,6 +26,8 @@ behind modern deduplicating backup systems:
   so identical chunks are automatically deduplicated.
 - **Concurrency** — chunk hashing and writing run across a worker pool with
   proper cancellation.
+- **Incremental** — backing up a source again reuses files unchanged since the
+  last snapshot (by size and mtime), so only new and modified data is read.
 
 ## Install
 
@@ -76,6 +78,10 @@ its hash, and streams the file back out — verifying integrity as it goes.
   their permissions are preserved, but symlinks, devices, sockets, and other
   non-regular files are skipped. Each `backup` run reports how many it skipped.
   Storing symlinks is planned for a later milestone.
+- **Incremental backups use size + mtime.** Backing up a source again reuses
+  files whose size and modification time match the previous snapshot, skipping
+  the re-read. A file edited in place without its mtime changing (rare) would
+  not be picked up.
 
 ## Roadmap
 
@@ -86,7 +92,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 - [x] **M4** Content-defined chunking (rolling hash)
 - [x] **M5** Deduplication + `stats` (dedup ratio, space saved)
 - [x] **M6** Concurrent worker pool + cancellation
-- [ ] **M7** Incremental snapshots
+- [x] **M7** Incremental snapshots
 - [ ] **M8** Benchmarks
 - [ ] **M9** Compression
 - [ ] **M10** Encryption at rest

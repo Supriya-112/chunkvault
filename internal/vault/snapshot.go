@@ -21,10 +21,11 @@ func newSnapshotID() string {
 
 // FileEntry records one backed-up file and the ordered hashes of its chunks.
 type FileEntry struct {
-	Path   string   `json:"path"`   // path relative to the backup source root
-	Size   int64    `json:"size"`   // size in bytes
-	Mode   uint32   `json:"mode"`   // unix file mode bits
-	Chunks []string `json:"chunks"` // ordered chunk hashes; concatenate to rebuild
+	Path    string   `json:"path"`   // path relative to the backup source root
+	Size    int64    `json:"size"`   // size in bytes
+	Mode    uint32   `json:"mode"`   // unix file mode bits
+	ModTime int64    `json:"mtime"`  // modification time, unix nanoseconds
+	Chunks  []string `json:"chunks"` // ordered chunk hashes; concatenate to rebuild
 }
 
 // DirEntry records one backed-up directory so empty directories survive a
