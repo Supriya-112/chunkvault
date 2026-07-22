@@ -72,6 +72,21 @@ snapshot = ordered list of chunk hashes per file  ◀─────────
 Restoring walks the snapshot's chunk list, pulls each chunk from the store by
 its hash, and streams the file back out — verifying integrity as it goes.
 
+## Benchmarks
+
+Representative throughput on an Intel Core i5-1038NG7 (4 cores), macOS, Go 1.26.
+Run them yourself with `go test -bench=. -benchmem ./...` — numbers vary by
+machine and disk.
+
+| Benchmark            | Throughput       | Measures                                                     |
+| -------------------- | ---------------- | ------------------------------------------------------------ |
+| `Split`              | ~1.0 GB/s        | content-defined chunking (rolling hash + boundary search)    |
+| `BackupFull`         | ~0.7 GB/s        | full backup: read + chunk + SHA-256 + store, across workers  |
+| `BackupIncremental`  | ~10 GB/s (eff.)  | re-backup of unchanged data — every file reused, none re-read |
+
+The incremental figure is effective throughput: it reflects skipping unchanged
+data, not raw I/O.
+
 ## Limitations
 
 - **Regular files and directories only.** Directories (including empty ones) and
@@ -93,7 +108,7 @@ its hash, and streams the file back out — verifying integrity as it goes.
 - [x] **M5** Deduplication + `stats` (dedup ratio, space saved)
 - [x] **M6** Concurrent worker pool + cancellation
 - [x] **M7** Incremental snapshots
-- [ ] **M8** Benchmarks
+- [x] **M8** Benchmarks
 - [ ] **M9** Compression
 - [ ] **M10** Encryption at rest
 - [ ] **M11** `verify` (corruption detection)
