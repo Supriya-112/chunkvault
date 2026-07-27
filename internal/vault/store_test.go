@@ -14,7 +14,7 @@ func TestPutChunkDeduplicates(t *testing.T) {
 
 	data := []byte("hello chunkvault")
 
-	h1, new1, err := store.PutChunk(data)
+	h1, new1, _, err := store.PutChunk(data)
 	if err != nil {
 		t.Fatalf("first PutChunk: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestPutChunkDeduplicates(t *testing.T) {
 		t.Fatal("first PutChunk should report the chunk as new")
 	}
 
-	h2, new2, err := store.PutChunk(data)
+	h2, new2, _, err := store.PutChunk(data)
 	if err != nil {
 		t.Fatalf("second PutChunk: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}
 
 	data := []byte("some bytes to store and read back")
-	hash, _, err := store.PutChunk(data)
+	hash, _, _, err := store.PutChunk(data)
 	if err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPutChunkConcurrentIdentical(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, wasNew, err := store.PutChunk(data)
+			_, wasNew, _, err := store.PutChunk(data)
 			news[i], errs[i] = wasNew, err // distinct indices: no shared writes
 		}(i)
 	}
@@ -98,8 +98,8 @@ func TestDifferentDataDifferentHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	h1, _, _ := store.PutChunk([]byte("aaaa"))
-	h2, _, _ := store.PutChunk([]byte("bbbb"))
+	h1, _, _, _ := store.PutChunk([]byte("aaaa"))
+	h2, _, _, _ := store.PutChunk([]byte("bbbb"))
 	if h1 == h2 {
 		t.Fatal("different data must not share a hash")
 	}

@@ -21,7 +21,7 @@ func TestStatsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
-	if !strings.Contains(out, "snapshots:") || !strings.Contains(out, "deduplicated") {
+	if !strings.Contains(out, "snapshots:") || !strings.Contains(out, "smaller") {
 		t.Fatalf("unexpected stats output:\n%s", out)
 	}
 }

@@ -50,7 +50,7 @@ func TestBackupPreservesChunkOrderAcrossWorkers(t *testing.T) {
 
 	vaultDir := t.TempDir()
 	const smallChunk = 1024
-	res, err := Backup(context.Background(), src, vaultDir, smallChunk, 8)
+	res, err := Backup(context.Background(), src, vaultDir, smallChunk, 8, Zstd)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	first, err := Backup(context.Background(), src, vaultDir, 4096, 4)
+	first, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd)
 	if err != nil {
 		t.Fatalf("first backup: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := Backup(context.Background(), src, vaultDir, 4096, 4)
+	second, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd)
 	if err != nil {
 		t.Fatalf("second backup: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestBackupCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the run starts
 
-	_, err := Backup(ctx, src, t.TempDir(), 1024, 4)
+	_, err := Backup(ctx, src, t.TempDir(), 1024, 4, NoCompression)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestBackupStoreWriteErrorAborts(t *testing.T) {
 	}
 	defer os.Chmod(chunksDir, 0o755) // restore so t.TempDir cleanup can remove it
 
-	if _, err := Backup(context.Background(), src, vaultDir, 4096, 4); err == nil {
+	if _, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd); err == nil {
 		t.Fatal("expected an error when the chunk store is not writable")
 	}
 	entries, err := os.ReadDir(filepath.Join(vaultDir, "snapshots"))
@@ -219,7 +219,7 @@ func TestBackupUnreadableSourceFile(t *testing.T) {
 	}
 	defer os.Chmod(p, 0o644)
 
-	if _, err := Backup(context.Background(), src, t.TempDir(), 4096, 4); err == nil {
+	if _, err := Backup(context.Background(), src, t.TempDir(), 4096, 4, NoCompression); err == nil {
 		t.Fatal("expected an error backing up an unreadable file")
 	}
 }

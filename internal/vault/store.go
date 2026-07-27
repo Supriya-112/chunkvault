@@ -21,7 +21,8 @@ import (
 // Store is a content-addressable chunk store rooted at a directory. It is safe
 // for concurrent use by multiple goroutines.
 type Store struct {
-	root string
+	root  string
+	codec Codec // compression applied to newly written chunks; reads honour each chunk's own tag
 
 	mu   sync.Mutex
 	seen map[string]bool // hashes known to be stored, so concurrent PutChunk calls write each chunk once
@@ -53,12 +54,15 @@ func (s *Store) chunkPath(hash string) string {
 }
 
 // PutChunk stores data under the hash of its contents and returns that hash.
-// wasNew is false when the chunk already existed — i.e. a deduplication hit.
-// The write is atomic: content goes to a temp file that is renamed into place.
+// The hash is always taken over the uncompressed bytes, so deduplication is
+// unaffected by the codec a chunk happens to be stored with. wasNew is false
+// when the chunk already existed — i.e. a deduplication hit — and stored is the
+// number of bytes actually written to disk (0 on a dedup hit). The write is
+// atomic: content goes to a temp file that is renamed into place.
 //
 // It is safe to call concurrently: a chunk is claimed under a lock before the
 // write, so exactly one caller writes any given chunk and reports wasNew.
-func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, err error) {
+func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, stored int, err error) {
 	sum := sha256.Sum256(data)
 	hash = hex.EncodeToString(sum[:])
 	dst := s.chunkPath(hash)
@@ -66,12 +70,12 @@ func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, err error) {
 	s.mu.Lock()
 	if s.seen[hash] {
 		s.mu.Unlock()
-		return hash, false, nil // another chunk with this content already handled it
+		return hash, false, 0, nil // another chunk with this content already handled it
 	}
 	if _, statErr := os.Stat(dst); statErr == nil {
 		s.seen[hash] = true
 		s.mu.Unlock()
-		return hash, false, nil // already on disk from a previous run — dedup
+		return hash, false, 0, nil // already on disk from a previous run — dedup
 	}
 	s.seen[hash] = true // claim it; we are the one writer
 	s.mu.Unlock()
@@ -86,22 +90,41 @@ func (s *Store) PutChunk(data []byte) (hash string, wasNew bool, err error) {
 		}
 	}()
 
+	encoded, err := encodeChunk(s.codec, data)
+	if err != nil {
+		return "", false, 0, err
+	}
 	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	tmp := dst + ".tmp"
-	if err = os.WriteFile(tmp, data, 0o644); err != nil {
-		return "", false, err
+	if err = os.WriteFile(tmp, encoded, 0o644); err != nil {
+		return "", false, 0, err
 	}
 	if err = os.Rename(tmp, dst); err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
-	return hash, true, nil
+	return hash, true, len(encoded), nil
 }
 
-// GetChunk returns the contents of the chunk with the given hash.
+// GetChunk returns the original contents of the chunk with the given hash,
+// decompressing it if it was stored compressed. It verifies that the decoded
+// bytes hash to the name the chunk is stored under, so a corrupted or
+// undecodable chunk is reported as an integrity failure rather than restored.
 func (s *Store) GetChunk(hash string) ([]byte, error) {
-	return os.ReadFile(s.chunkPath(hash))
+	raw, err := os.ReadFile(s.chunkPath(hash))
+	if err != nil {
+		return nil, err
+	}
+	data, err := decodeChunk(raw)
+	if err != nil {
+		return nil, fmt.Errorf("chunk %s failed integrity check: %w", hash, err)
+	}
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); got != hash {
+		return nil, fmt.Errorf("chunk %s failed integrity check: content hashes to %s", hash, got)
+	}
+	return data, nil
 }
 
 // ListSnapshots returns the IDs of every snapshot in the vault, sorted.

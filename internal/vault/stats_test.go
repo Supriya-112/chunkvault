@@ -22,7 +22,7 @@ func TestComputeStatsReportsDedup(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4); err != nil {
+	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Zstd); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
@@ -40,8 +40,8 @@ func TestComputeStatsReportsDedup(t *testing.T) {
 	if st.ChunkRefs <= st.UniqueChunks {
 		t.Errorf("with duplicate files, chunk references (%d) should exceed unique chunks (%d)", st.ChunkRefs, st.UniqueChunks)
 	}
-	if st.SavedBytes() <= 0 || st.DedupRatio() <= 0 {
-		t.Errorf("expected positive dedup, got saved=%d ratio=%.2f", st.SavedBytes(), st.DedupRatio())
+	if st.SavedBytes() <= 0 || st.ReductionRatio() <= 0 {
+		t.Errorf("expected positive savings, got saved=%d ratio=%.2f", st.SavedBytes(), st.ReductionRatio())
 	}
 }
 
@@ -53,8 +53,8 @@ func TestComputeStatsEmptyVault(t *testing.T) {
 	if st.Snapshots != 0 || st.UniqueChunks != 0 || st.LogicalBytes != 0 {
 		t.Errorf("expected empty stats, got %+v", *st)
 	}
-	if st.DedupRatio() != 0 {
-		t.Errorf("dedup ratio of an empty vault = %v, want 0", st.DedupRatio())
+	if st.ReductionRatio() != 0 {
+		t.Errorf("reduction ratio of an empty vault = %v, want 0", st.ReductionRatio())
 	}
 }
 

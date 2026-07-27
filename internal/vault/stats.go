@@ -16,14 +16,16 @@ type Stats struct {
 	ChunkRefs    int   // chunk references across every snapshot, counting repeats
 }
 
-// SavedBytes is the number of bytes deduplication avoided storing.
+// SavedBytes is the number of logical bytes not held on disk, thanks to
+// deduplication and compression together.
 func (s Stats) SavedBytes() int64 {
 	return s.LogicalBytes - s.StoredBytes
 }
 
-// DedupRatio is the fraction of logical bytes that did not need to be stored
-// (0.0 to 1.0), or 0 when nothing has been backed up.
-func (s Stats) DedupRatio() float64 {
+// ReductionRatio is the fraction of logical bytes that did not need to be
+// stored (0.0 to 1.0), combining deduplication and compression, or 0 when
+// nothing has been backed up.
+func (s Stats) ReductionRatio() float64 {
 	if s.LogicalBytes == 0 {
 		return 0
 	}

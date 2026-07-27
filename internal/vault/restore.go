@@ -1,8 +1,6 @@
 package vault
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,8 +68,9 @@ func Restore(vaultDir, snapshotID, targetDir string) (*RestoreResult, error) {
 	return res, nil
 }
 
-// restoreFile writes a single file entry from its chunks, verifying each
-// chunk's integrity against its hash before writing it.
+// restoreFile writes a single file entry by concatenating its chunks. Each
+// chunk is fetched through GetChunk, which decompresses it and verifies its
+// integrity, so a corrupted vault is detected rather than silently restored.
 func restoreFile(store *Store, dst string, fe FileEntry, res *RestoreResult) (err error) {
 	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
@@ -91,10 +90,6 @@ func restoreFile(store *Store, dst string, fe FileEntry, res *RestoreResult) (er
 		data, gerr := store.GetChunk(want)
 		if gerr != nil {
 			return gerr
-		}
-		sum := sha256.Sum256(data)
-		if got := hex.EncodeToString(sum[:]); got != want {
-			return fmt.Errorf("chunk integrity check failed: want %s got %s", want, got)
 		}
 		if _, werr := f.Write(data); werr != nil {
 			return werr

@@ -21,12 +21,13 @@ type Result struct {
 	TotalChunks int
 	NewChunks   int   // chunks actually written (not deduplicated)
 	TotalBytes  int64 // logical bytes read from the source
-	StoredBytes int64 // bytes newly written to the store
+	StoredBytes int64 // bytes newly written to the store, after dedup and compression
 }
 
-// DedupRatio returns the fraction of scanned bytes that were deduplicated
-// (0.0 to 1.0). Returns 0 when nothing was read.
-func (r Result) DedupRatio() float64 {
+// ReductionRatio returns the fraction of scanned bytes that did not reach the
+// store (0.0 to 1.0), combining deduplication and compression. Returns 0 when
+// nothing was read.
+func (r Result) ReductionRatio() float64 {
 	if r.TotalBytes == 0 {
 		return 0
 	}
@@ -47,16 +48,18 @@ type chunkResult struct {
 	index  int
 	hash   string
 	wasNew bool
-	size   int
+	size   int // uncompressed size, for logical-byte accounting
+	stored int // bytes written to disk (0 on a dedup hit), after compression
 	err    error
 }
 
 // Backup walks sourceDir, chunks every regular file, and stores unique chunks
-// in the vault at vaultDir, then writes a snapshot manifest. Chunk hashing and
-// writing run across a pool of workers; workers defaults to runtime.NumCPU()
-// when <= 0. A chunkSize <= 0 uses the chunk package default. Cancelling ctx
-// aborts the run and returns ctx.Err().
-func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers int) (*Result, error) {
+// in the vault at vaultDir, then writes a snapshot manifest. New chunks are
+// compressed with the given codec (each chunk records its own codec, so a
+// vault may mix them). Chunk hashing and writing run across a pool of workers;
+// workers defaults to runtime.NumCPU() when <= 0. A chunkSize <= 0 uses the
+// chunk package default. Cancelling ctx aborts the run and returns ctx.Err().
+func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers int, compression Codec) (*Result, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -64,6 +67,7 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	if err != nil {
 		return nil, err
 	}
+	store.codec = compression
 
 	// A local cancellable context so a store error in one worker stops the rest.
 	ctx, cancel := context.WithCancel(ctx)
@@ -91,9 +95,9 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 				if ctx.Err() != nil {
 					continue // draining after cancellation; do no work
 				}
-				hash, wasNew, err := store.PutChunk(j.data)
+				hash, wasNew, stored, err := store.PutChunk(j.data)
 				select {
-				case results <- chunkResult{file: j.file, index: j.index, hash: hash, wasNew: wasNew, size: len(j.data), err: err}:
+				case results <- chunkResult{file: j.file, index: j.index, hash: hash, wasNew: wasNew, size: len(j.data), stored: stored, err: err}:
 				case <-ctx.Done():
 				}
 			}
@@ -137,7 +141,7 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 		res.TotalBytes += int64(r.size)
 		if r.wasNew {
 			res.NewChunks++
-			res.StoredBytes += int64(r.size)
+			res.StoredBytes += int64(r.stored)
 		}
 	}
 	if perr := <-produceErr; perr != nil && firstErr == nil {

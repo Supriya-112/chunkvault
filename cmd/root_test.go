@@ -45,3 +45,50 @@ func TestBackupOnValidDir(t *testing.T) {
 		t.Fatalf("expected a snapshot summary, got: %q", out)
 	}
 }
+
+// TestBackupCompressFlag runs a backup -> restore through the CLI with each
+// --compress value and checks the data survives the round-trip intact.
+func TestBackupCompressFlag(t *testing.T) {
+	want := bytes.Repeat([]byte("compress me "), 5000)
+	for _, codec := range []string{"none", "gzip", "zstd"} {
+		t.Run(codec, func(t *testing.T) {
+			src := t.TempDir()
+			if err := os.WriteFile(filepath.Join(src, "a.txt"), want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			vaultDir := t.TempDir()
+
+			out, err := runCmd("backup", src, "--vault", vaultDir, "--compress", codec)
+			if err != nil {
+				t.Fatalf("backup --compress %s: %v", codec, err)
+			}
+			snapID := parseSnapshotID(t, out)
+
+			target := t.TempDir()
+			if _, err := runCmd("restore", snapID, target, "--vault", vaultDir); err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(target, "a.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("--compress %s: restored content differs from source", codec)
+			}
+		})
+	}
+}
+
+func TestBackupRejectsUnknownCompress(t *testing.T) {
+	// The flag var is shared across runCmd calls, so restore the default once
+	// this test has poked in an invalid value.
+	defer func() { backupCompress = "zstd" }()
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCmd("backup", src, "--vault", t.TempDir(), "--compress", "brotli"); err == nil {
+		t.Fatal("expected an error for an unknown --compress value")
+	}
+}

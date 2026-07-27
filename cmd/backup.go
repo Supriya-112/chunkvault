@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	backupVault   string
-	backupWorkers int
+	backupVault    string
+	backupWorkers  int
+	backupCompress string
 )
 
 var backupCmd = &cobra.Command{
@@ -18,7 +19,11 @@ var backupCmd = &cobra.Command{
 	Short: "Back up a directory into the vault",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers)
+		codec, err := vault.ParseCodec(backupCompress)
+		if err != nil {
+			return err
+		}
+		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers, codec)
 		if err != nil {
 			return err
 		}
@@ -29,8 +34,8 @@ var backupCmd = &cobra.Command{
 			fmt.Fprintf(out, "  reused:  %d unchanged from the previous snapshot\n", res.Reused)
 		}
 		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
-		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% deduplicated)\n",
-			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.DedupRatio()*100)
+		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% smaller)\n",
+			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.ReductionRatio()*100)
 		if res.Skipped > 0 {
 			fmt.Fprintf(out, "  skipped: %d non-regular entries (symlinks, devices, etc.)\n", res.Skipped)
 		}
@@ -41,6 +46,7 @@ var backupCmd = &cobra.Command{
 func init() {
 	backupCmd.Flags().StringVar(&backupVault, "vault", "./vault", "path to the vault directory")
 	backupCmd.Flags().IntVar(&backupWorkers, "workers", 0, "number of chunk workers (0 = one per CPU)")
+	backupCmd.Flags().StringVar(&backupCompress, "compress", "zstd", "chunk compression: none, gzip, or zstd")
 	rootCmd.AddCommand(backupCmd)
 }
 

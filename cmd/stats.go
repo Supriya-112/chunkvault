@@ -25,7 +25,7 @@ var statsCmd = &cobra.Command{
 		fmt.Fprintf(out, "  unique chunks: %d\n", st.UniqueChunks)
 		fmt.Fprintf(out, "  logical size:  %s across %d chunk references\n", humanBytes(st.LogicalBytes), st.ChunkRefs)
 		fmt.Fprintf(out, "  stored size:   %s\n", humanBytes(st.StoredBytes))
-		fmt.Fprintf(out, "  saved:         %s (%.0f%% deduplicated)\n", humanBytes(st.SavedBytes()), st.DedupRatio()*100)
+		fmt.Fprintf(out, "  saved:         %s (%.0f%% smaller after dedup + compression)\n", humanBytes(st.SavedBytes()), st.ReductionRatio()*100)
 		return nil
 	},
 }

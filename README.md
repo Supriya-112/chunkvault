@@ -10,7 +10,7 @@ and stores only the chunks it hasn't seen before. Back up the same folder twice
 and the second run stores almost nothing — only what actually changed. It's a
 small, readable take on tools like [restic](https://restic.net) and
 [borg](https://www.borgbackup.org), built to explore content-defined chunking,
-deduplication, and concurrent I/O.
+deduplication, compression, and concurrent I/O.
 
 > **Status: early development.** Building in the open, one milestone at a time —
 > see the [roadmap](#roadmap).
@@ -28,6 +28,9 @@ behind modern deduplicating backup systems:
   proper cancellation.
 - **Incremental** — backing up a source again reuses files unchanged since the
   last snapshot (by size and mtime), so only new and modified data is read.
+- **Compression** — chunks are compressed before they're stored (zstd by
+  default, gzip optional). Already-compressed data is detected and stored as-is,
+  so a chunk never grows on disk.
 
 ## Install
 
@@ -51,6 +54,10 @@ go build -o chunkvault .
 chunkvault backup ./my-documents
 chunkvault backup ./my-documents --workers 4
 
+# Choose chunk compression: zstd (default), gzip, or none
+chunkvault backup ./my-documents --compress gzip
+chunkvault backup ./my-documents --compress none
+
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
 
@@ -64,13 +71,17 @@ chunkvault --version
 ## How it works
 
 ```
-files ──▶ chunker ──▶ [chunk, chunk, chunk] ──▶ hash each ──▶ store unique only
+files ──▶ chunker ──▶ [chunk, chunk, chunk] ──▶ hash each ──▶ compress + store unique only
                                                                   │
 snapshot = ordered list of chunk hashes per file  ◀──────────────┘
 ```
 
-Restoring walks the snapshot's chunk list, pulls each chunk from the store by
-its hash, and streams the file back out — verifying integrity as it goes.
+Each chunk is hashed over its *uncompressed* bytes, so compression never
+changes what deduplicates. A one-byte codec tag on every stored chunk records
+how it was compressed, so a vault can mix codecs and restore always knows how to
+decode. Restoring walks the snapshot's chunk list, pulls each chunk from the
+store by its hash, decompresses it, and streams the file back out — verifying
+integrity as it goes.
 
 ## Benchmarks
 
@@ -80,12 +91,19 @@ machine and disk.
 
 | Benchmark            | Throughput       | Measures                                                     |
 | -------------------- | ---------------- | ------------------------------------------------------------ |
-| `Split`              | ~1.0 GB/s        | content-defined chunking (rolling hash + boundary search)    |
+| `Split`              | ~1.2 GB/s        | content-defined chunking (rolling hash + boundary search)    |
 | `BackupFull`         | ~0.7 GB/s        | full backup: read + chunk + SHA-256 + store, across workers  |
-| `BackupIncremental`  | ~10 GB/s (eff.)  | re-backup of unchanged data — every file reused, none re-read |
+| `BackupIncremental`  | ~20 GB/s (eff.)  | re-backup of unchanged data — every file reused, none re-read |
+| `BackupZstd`         | ~180 MB/s        | full backup of compressible data, compressed with zstd (default) |
+| `BackupGzip`         | ~120 MB/s        | full backup of compressible data, compressed with gzip       |
 
 The incremental figure is effective throughput: it reflects skipping unchanged
-data, not raw I/O.
+data, not raw I/O. On the synthetic compressible dataset the compression
+benchmarks shrink the vault ~1.6× (zstd) to ~1.9× (gzip); real-world text and
+logs typically compress further. zstd is the default because it is roughly 50%
+faster and closes most of that gap on real data. Compression trades throughput
+for space — pass `--compress none` when the source is already compressed
+(`BackupFull` above is the uncompressed path).
 
 ## Limitations
 
@@ -109,7 +127,7 @@ data, not raw I/O.
 - [x] **M6** Concurrent worker pool + cancellation
 - [x] **M7** Incremental snapshots
 - [x] **M8** Benchmarks
-- [ ] **M9** Compression
+- [x] **M9** Compression (per-chunk zstd/gzip, incompressible fallback)
 - [ ] **M10** Encryption at rest
 - [ ] **M11** `verify` (corruption detection)
 - [ ] **M12** TUI progress view
