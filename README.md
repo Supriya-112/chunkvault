@@ -73,6 +73,13 @@ chunkvault restore <snapshot-id> ./restored --vault ./secure
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
 
+# Check the vault's integrity: read every chunk back and confirm it still
+# matches its ID (add a snapshot ID to check just one; --quick skips the
+# content read and only confirms chunks are present)
+chunkvault verify
+chunkvault verify <snapshot-id>
+chunkvault verify --quick
+
 # Show deduplication statistics for the vault
 chunkvault stats
 
@@ -93,7 +100,9 @@ changes what deduplicates. A one-byte codec tag on every stored chunk records
 how it was compressed, so a vault can mix codecs and restore always knows how to
 decode. Restoring walks the snapshot's chunk list, pulls each chunk from the
 store by its ID, decompresses it, and streams the file back out — verifying
-integrity as it goes.
+integrity as it goes. The `verify` command runs that same check across every
+stored chunk, and confirms each snapshot's chunks are present, without writing
+anything — so you can catch bit-rot before you actually need to restore.
 
 ## Encryption
 
@@ -165,7 +174,7 @@ for space — pass `--compress none` when the source is already compressed
 - [x] **M8** Benchmarks
 - [x] **M9** Compression (per-chunk zstd/gzip, incompressible fallback)
 - [x] **M10** Encryption at rest (Argon2id + XChaCha20-Poly1305, keyed-HMAC names)
-- [ ] **M11** `verify` (corruption detection)
+- [x] **M11** `verify` (whole-vault or per-snapshot integrity check, concurrent)
 - [ ] **M12** TUI progress view
 - [ ] **M13** Remote (S3) backend
 
