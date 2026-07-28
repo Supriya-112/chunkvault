@@ -41,13 +41,13 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	backupRes, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Zstd)
+	backupRes, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Options{Compression: Zstd})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
 	target := t.TempDir()
-	if _, err := Restore(vaultDir, backupRes.SnapshotID, target); err != nil {
+	if _, err := Restore(vaultDir, backupRes.SnapshotID, target, nil); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -73,13 +73,13 @@ func TestBackupRestorePreservesEmptyDirs(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Gzip)
+	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Options{Compression: Gzip})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
 	target := t.TempDir()
-	if _, err := Restore(vaultDir, res.SnapshotID, target); err != nil {
+	if _, err := Restore(vaultDir, res.SnapshotID, target, nil); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestRestoreDetectsCorruptChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultDir := t.TempDir()
-	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 2, Zstd)
+	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 2, Options{Compression: Zstd})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestRestoreDetectsCorruptChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = Restore(vaultDir, res.SnapshotID, t.TempDir())
+	_, err = Restore(vaultDir, res.SnapshotID, t.TempDir(), nil)
 	if err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("expected an integrity error, got %v", err)
 	}
@@ -135,7 +135,7 @@ func TestRestoreMissingChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultDir := t.TempDir()
-	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 2, NoCompression)
+	res, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 2, Options{Compression: NoCompression})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -144,14 +144,14 @@ func TestRestoreMissingChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Restore(vaultDir, res.SnapshotID, t.TempDir()); err == nil {
+	if _, err := Restore(vaultDir, res.SnapshotID, t.TempDir(), nil); err == nil {
 		t.Fatal("expected an error restoring with a missing chunk")
 	}
 }
 
 func TestRestoreVaultNotFound(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	if _, err := Restore(missing, "snap", t.TempDir()); err == nil {
+	if _, err := Restore(missing, "snap", t.TempDir(), nil); err == nil {
 		t.Fatal("expected an error restoring from a nonexistent vault")
 	}
 }

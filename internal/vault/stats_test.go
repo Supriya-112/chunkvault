@@ -22,11 +22,11 @@ func TestComputeStatsReportsDedup(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Zstd); err != nil {
+	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 4, Options{Compression: Zstd}); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	st, err := ComputeStats(vaultDir)
+	st, err := ComputeStats(vaultDir, nil)
 	if err != nil {
 		t.Fatalf("ComputeStats: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestComputeStatsReportsDedup(t *testing.T) {
 }
 
 func TestComputeStatsEmptyVault(t *testing.T) {
-	st, err := ComputeStats(t.TempDir())
+	st, err := ComputeStats(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("ComputeStats: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestComputeStatsEmptyVault(t *testing.T) {
 
 func TestComputeStatsVaultNotFound(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	if _, err := ComputeStats(missing); err == nil {
+	if _, err := ComputeStats(missing, nil); err == nil {
 		t.Fatal("expected an error computing stats for a nonexistent vault")
 	}
 }

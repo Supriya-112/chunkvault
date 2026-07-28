@@ -50,7 +50,7 @@ func TestBackupPreservesChunkOrderAcrossWorkers(t *testing.T) {
 
 	vaultDir := t.TempDir()
 	const smallChunk = 1024
-	res, err := Backup(context.Background(), src, vaultDir, smallChunk, 8, Zstd)
+	res, err := Backup(context.Background(), src, vaultDir, smallChunk, 8, Options{Compression: Zstd})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestBackupPreservesChunkOrderAcrossWorkers(t *testing.T) {
 	}
 
 	target := t.TempDir()
-	if _, err := Restore(vaultDir, res.SnapshotID, target); err != nil {
+	if _, err := Restore(vaultDir, res.SnapshotID, target, nil); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	for rel, want := range files {
@@ -93,7 +93,7 @@ func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
 	}
 
 	vaultDir := t.TempDir()
-	first, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd)
+	first, err := Backup(context.Background(), src, vaultDir, 4096, 4, Options{Compression: Zstd})
 	if err != nil {
 		t.Fatalf("first backup: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd)
+	second, err := Backup(context.Background(), src, vaultDir, 4096, 4, Options{Compression: Zstd})
 	if err != nil {
 		t.Fatalf("second backup: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestBackupIncrementalReusesUnchangedFiles(t *testing.T) {
 
 	// The second snapshot must restore correctly, including the reused file.
 	target := t.TempDir()
-	if _, err := Restore(vaultDir, second.SnapshotID, target); err != nil {
+	if _, err := Restore(vaultDir, second.SnapshotID, target, nil); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	for _, name := range []string{"stable.bin", "changing.bin", "added.bin"} {
@@ -163,7 +163,7 @@ func TestBackupCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before the run starts
 
-	_, err := Backup(ctx, src, t.TempDir(), 1024, 4, NoCompression)
+	_, err := Backup(ctx, src, t.TempDir(), 1024, 4, Options{Compression: NoCompression})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -191,7 +191,7 @@ func TestBackupStoreWriteErrorAborts(t *testing.T) {
 	}
 	defer os.Chmod(chunksDir, 0o755) // restore so t.TempDir cleanup can remove it
 
-	if _, err := Backup(context.Background(), src, vaultDir, 4096, 4, Zstd); err == nil {
+	if _, err := Backup(context.Background(), src, vaultDir, 4096, 4, Options{Compression: Zstd}); err == nil {
 		t.Fatal("expected an error when the chunk store is not writable")
 	}
 	entries, err := os.ReadDir(filepath.Join(vaultDir, "snapshots"))
@@ -219,7 +219,7 @@ func TestBackupUnreadableSourceFile(t *testing.T) {
 	}
 	defer os.Chmod(p, 0o644)
 
-	if _, err := Backup(context.Background(), src, t.TempDir(), 4096, 4, NoCompression); err == nil {
+	if _, err := Backup(context.Background(), src, t.TempDir(), 4096, 4, Options{Compression: NoCompression}); err == nil {
 		t.Fatal("expected an error backing up an unreadable file")
 	}
 }

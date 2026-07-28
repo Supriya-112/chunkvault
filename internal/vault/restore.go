@@ -15,10 +15,11 @@ type RestoreResult struct {
 
 // Restore rebuilds the files recorded in snapshotID into targetDir, pulling
 // each chunk from the vault, verifying its integrity, and restoring file
-// permissions. Chunk contents are checked against their expected hash, so a
-// corrupted vault is detected rather than silently restored.
-func Restore(vaultDir, snapshotID, targetDir string) (*RestoreResult, error) {
-	store, err := openExisting(vaultDir)
+// permissions. Chunk contents are checked against their expected ID, so a
+// corrupted vault is detected rather than silently restored. An encrypted vault
+// requires the passphrase it was created with.
+func Restore(vaultDir, snapshotID, targetDir string, passphrase []byte) (*RestoreResult, error) {
+	store, err := openStore(vaultDir, passphrase, false)
 	if err != nil {
 		return nil, err
 	}

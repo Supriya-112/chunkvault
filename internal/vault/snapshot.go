@@ -44,22 +44,35 @@ type Snapshot struct {
 	Files  []FileEntry `json:"files"`
 }
 
-// SaveSnapshot writes a snapshot manifest into the vault as pretty JSON.
+// SaveSnapshot writes a snapshot manifest into the vault. For an encrypted
+// vault the manifest is encrypted too, so file paths, sizes, and the directory
+// structure are not exposed on disk.
 func (s *Store) SaveSnapshot(snap *Snapshot) error {
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
 	}
+	if s.enc != nil {
+		if data, err = s.enc.seal(data); err != nil {
+			return err
+		}
+	}
 	path := filepath.Join(s.root, "snapshots", snap.ID+".json")
 	return os.WriteFile(path, data, 0o644)
 }
 
-// LoadSnapshot reads a snapshot manifest by its ID.
+// LoadSnapshot reads a snapshot manifest by its ID, decrypting it first when
+// the vault is encrypted.
 func (s *Store) LoadSnapshot(id string) (*Snapshot, error) {
 	path := filepath.Join(s.root, "snapshots", id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("loading snapshot %q: %w", id, err)
+	}
+	if s.enc != nil {
+		if data, err = s.enc.open(data); err != nil {
+			return nil, fmt.Errorf("decrypting snapshot %q: %w", id, err)
+		}
 	}
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {

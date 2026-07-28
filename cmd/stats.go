@@ -8,14 +8,21 @@ import (
 	"github.com/Supriya-112/chunkvault/internal/vault"
 )
 
-var statsVault string
+var (
+	statsVault          string
+	statsPassphraseFile string
+)
 
 var statsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Show deduplication statistics for the vault",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		st, err := vault.ComputeStats(statsVault)
+		passphrase, err := passphraseForVault(cmd, statsVault, statsPassphraseFile)
+		if err != nil {
+			return err
+		}
+		st, err := vault.ComputeStats(statsVault, passphrase)
 		if err != nil {
 			return err
 		}
@@ -32,5 +39,6 @@ var statsCmd = &cobra.Command{
 
 func init() {
 	statsCmd.Flags().StringVar(&statsVault, "vault", "./vault", "path to the vault directory")
+	statsCmd.Flags().StringVar(&statsPassphraseFile, "passphrase-file", "", "read the vault passphrase from this file")
 	rootCmd.AddCommand(statsCmd)
 }

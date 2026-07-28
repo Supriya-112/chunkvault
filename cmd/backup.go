@@ -9,9 +9,11 @@ import (
 )
 
 var (
-	backupVault    string
-	backupWorkers  int
-	backupCompress string
+	backupVault          string
+	backupWorkers        int
+	backupCompress       string
+	backupEncrypt        bool
+	backupPassphraseFile string
 )
 
 var backupCmd = &cobra.Command{
@@ -23,7 +25,24 @@ var backupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers, codec)
+
+		// A passphrase is needed to create a new encrypted vault (--encrypt) or
+		// to back up into one that is already encrypted. Only ask the user to
+		// confirm the passphrase when they are setting it on a new vault.
+		var passphrase []byte
+		alreadyEncrypted, err := vault.IsEncrypted(backupVault)
+		if err != nil {
+			return err
+		}
+		if backupEncrypt || alreadyEncrypted {
+			passphrase, err = vaultPassphrase(cmd, backupPassphraseFile, backupEncrypt && !alreadyEncrypted)
+			if err != nil {
+				return err
+			}
+		}
+
+		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers,
+			vault.Options{Compression: codec, Passphrase: passphrase})
 		if err != nil {
 			return err
 		}
@@ -36,6 +55,9 @@ var backupCmd = &cobra.Command{
 		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
 		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% smaller)\n",
 			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.ReductionRatio()*100)
+		if len(passphrase) > 0 {
+			fmt.Fprintf(out, "  encrypted: yes (XChaCha20-Poly1305)\n")
+		}
 		if res.Skipped > 0 {
 			fmt.Fprintf(out, "  skipped: %d non-regular entries (symlinks, devices, etc.)\n", res.Skipped)
 		}
@@ -47,6 +69,8 @@ func init() {
 	backupCmd.Flags().StringVar(&backupVault, "vault", "./vault", "path to the vault directory")
 	backupCmd.Flags().IntVar(&backupWorkers, "workers", 0, "number of chunk workers (0 = one per CPU)")
 	backupCmd.Flags().StringVar(&backupCompress, "compress", "zstd", "chunk compression: none, gzip, or zstd")
+	backupCmd.Flags().BoolVar(&backupEncrypt, "encrypt", false, "create an encrypted vault (prompts for a passphrase)")
+	backupCmd.Flags().StringVar(&backupPassphraseFile, "passphrase-file", "", "read the vault passphrase from this file")
 	rootCmd.AddCommand(backupCmd)
 }
 

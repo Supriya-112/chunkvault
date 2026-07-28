@@ -10,7 +10,7 @@ and stores only the chunks it hasn't seen before. Back up the same folder twice
 and the second run stores almost nothing — only what actually changed. It's a
 small, readable take on tools like [restic](https://restic.net) and
 [borg](https://www.borgbackup.org), built to explore content-defined chunking,
-deduplication, compression, and concurrent I/O.
+deduplication, compression, encryption, and concurrent I/O.
 
 > **Status: early development.** Building in the open, one milestone at a time —
 > see the [roadmap](#roadmap).
@@ -31,6 +31,9 @@ behind modern deduplicating backup systems:
 - **Compression** — chunks are compressed before they're stored (zstd by
   default, gzip optional). Already-compressed data is detected and stored as-is,
   so a chunk never grows on disk.
+- **Encryption at rest** — an optional passphrase (Argon2id → XChaCha20-Poly1305)
+  encrypts every chunk and manifest, and names chunks by a keyed HMAC so even the
+  file names on disk reveal nothing about their contents.
 
 ## Install
 
@@ -58,6 +61,15 @@ chunkvault backup ./my-documents --workers 4
 chunkvault backup ./my-documents --compress gzip
 chunkvault backup ./my-documents --compress none
 
+# Create an encrypted vault (prompts for a passphrase the first time).
+# The passphrase can also come from $CHUNKVAULT_PASSPHRASE or --passphrase-file.
+chunkvault backup ./my-documents --vault ./secure --encrypt
+
+# Once a vault is encrypted, backup/restore/stats detect that and ask for the
+# passphrase automatically — no need to repeat --encrypt.
+export CHUNKVAULT_PASSPHRASE=...        # for scripts and CI
+chunkvault restore <snapshot-id> ./restored --vault ./secure
+
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
 
@@ -80,8 +92,32 @@ Each chunk is hashed over its *uncompressed* bytes, so compression never
 changes what deduplicates. A one-byte codec tag on every stored chunk records
 how it was compressed, so a vault can mix codecs and restore always knows how to
 decode. Restoring walks the snapshot's chunk list, pulls each chunk from the
-store by its hash, decompresses it, and streams the file back out — verifying
+store by its ID, decompresses it, and streams the file back out — verifying
 integrity as it goes.
+
+## Encryption
+
+Pass `--encrypt` when first creating a vault and every chunk and manifest is
+encrypted at rest:
+
+- **Key derivation** — your passphrase is stretched with **Argon2id** (salt and
+  parameters stored in `<vault>/config.json`) into a master key, from which an
+  encryption key and a naming key are derived via HKDF.
+- **Encryption** — chunks are compressed and then sealed with
+  **XChaCha20-Poly1305**; the 24-byte random nonce makes per-chunk encryption
+  safe without nonce bookkeeping. Snapshot manifests are encrypted the same way,
+  so file names, sizes, and the directory tree are not exposed.
+- **Content addressing without leaks** — an encrypted vault names each chunk by
+  `HMAC-SHA256(plaintext)` under the naming key rather than the plaintext's raw
+  SHA-256. Deduplication still works within the vault, but the file names reveal
+  nothing about the contents and can't be used to test for a known file.
+- **Integrity** — decryption is authenticated, and the recovered bytes are
+  checked against the ID they were stored under, so tampering is caught.
+
+**What it does not hide:** the number of chunks, their approximate sizes, and
+the timing of snapshots are still observable from the vault directory. There is
+no key rotation or passphrase change yet, and security rests on the strength of
+your passphrase. Lose the passphrase and the data is unrecoverable — by design.
 
 ## Benchmarks
 
@@ -128,7 +164,7 @@ for space — pass `--compress none` when the source is already compressed
 - [x] **M7** Incremental snapshots
 - [x] **M8** Benchmarks
 - [x] **M9** Compression (per-chunk zstd/gzip, incompressible fallback)
-- [ ] **M10** Encryption at rest
+- [x] **M10** Encryption at rest (Argon2id + XChaCha20-Poly1305, keyed-HMAC names)
 - [ ] **M11** `verify` (corruption detection)
 - [ ] **M12** TUI progress view
 - [ ] **M13** Remote (S3) backend

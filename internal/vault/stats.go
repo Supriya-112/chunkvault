@@ -32,9 +32,11 @@ func (s Stats) ReductionRatio() float64 {
 	return float64(s.LogicalBytes-s.StoredBytes) / float64(s.LogicalBytes)
 }
 
-// ComputeStats scans a vault and reports its deduplication statistics.
-func ComputeStats(vaultDir string) (*Stats, error) {
-	store, err := openExisting(vaultDir)
+// ComputeStats scans a vault and reports its deduplication statistics. An
+// encrypted vault requires its passphrase, since the per-snapshot logical sizes
+// are read from the (encrypted) manifests.
+func ComputeStats(vaultDir string, passphrase []byte) (*Stats, error) {
+	store, err := openStore(vaultDir, passphrase, false)
 	if err != nil {
 		return nil, err
 	}

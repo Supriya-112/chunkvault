@@ -58,7 +58,7 @@ func BenchmarkBackupFull(b *testing.B) {
 		b.StopTimer()
 		vaultDir := b.TempDir() // fresh vault so every run is a full backup
 		b.StartTimer()
-		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, NoCompression); err != nil {
+		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, Options{Compression: NoCompression}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -70,13 +70,13 @@ func BenchmarkBackupIncremental(b *testing.B) {
 	src := b.TempDir()
 	total := writeBenchDataset(b, src)
 	vaultDir := b.TempDir()
-	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, NoCompression); err != nil {
+	if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, Options{Compression: NoCompression}); err != nil {
 		b.Fatal(err) // prime the parent snapshot
 	}
 	b.SetBytes(total)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, NoCompression); err != nil {
+		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, Options{Compression: NoCompression}); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -94,10 +94,10 @@ func benchmarkCompressedBackup(b *testing.B, codec Codec) {
 
 	// Measure the compression ratio once, outside the timed loop.
 	measure := b.TempDir()
-	if _, err := Backup(context.Background(), src, measure, chunk.DefaultSize, 0, codec); err != nil {
+	if _, err := Backup(context.Background(), src, measure, chunk.DefaultSize, 0, Options{Compression: codec}); err != nil {
 		b.Fatal(err)
 	}
-	st, err := ComputeStats(measure)
+	st, err := ComputeStats(measure, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func benchmarkCompressedBackup(b *testing.B, codec Codec) {
 		b.StopTimer()
 		vaultDir := b.TempDir()
 		b.StartTimer()
-		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, codec); err != nil {
+		if _, err := Backup(context.Background(), src, vaultDir, chunk.DefaultSize, 0, Options{Compression: codec}); err != nil {
 			b.Fatal(err)
 		}
 	}

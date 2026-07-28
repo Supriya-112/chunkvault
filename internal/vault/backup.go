@@ -12,6 +12,12 @@ import (
 	"github.com/Supriya-112/chunkvault/internal/chunk"
 )
 
+// Options configures a backup run.
+type Options struct {
+	Compression Codec  // codec applied to newly written chunks
+	Passphrase  []byte // non-empty opens an encrypted vault, or creates one if the vault is new
+}
+
 // Result summarizes a completed backup run.
 type Result struct {
 	SnapshotID  string
@@ -55,19 +61,20 @@ type chunkResult struct {
 
 // Backup walks sourceDir, chunks every regular file, and stores unique chunks
 // in the vault at vaultDir, then writes a snapshot manifest. New chunks are
-// compressed with the given codec (each chunk records its own codec, so a
-// vault may mix them). Chunk hashing and writing run across a pool of workers;
+// compressed with opts.Compression, and — when opts.Passphrase is set — the
+// vault is encrypted (created encrypted if new; opened with the passphrase if
+// it already is). Chunk hashing and writing run across a pool of workers;
 // workers defaults to runtime.NumCPU() when <= 0. A chunkSize <= 0 uses the
 // chunk package default. Cancelling ctx aborts the run and returns ctx.Err().
-func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers int, compression Codec) (*Result, error) {
+func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers int, opts Options) (*Result, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	store, err := Open(vaultDir)
+	store, err := openStore(vaultDir, opts.Passphrase, true)
 	if err != nil {
 		return nil, err
 	}
-	store.codec = compression
+	store.codec = opts.Compression
 
 	// A local cancellable context so a store error in one worker stops the rest.
 	ctx, cancel := context.WithCancel(ctx)
