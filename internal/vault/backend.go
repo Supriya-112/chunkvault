@@ -34,7 +34,9 @@ type backend interface {
 	put(key string, data []byte) error
 	// exists reports whether an object is present at key.
 	exists(key string) (bool, error)
-	// list returns every object whose key begins with prefix.
+	// list returns every object beneath prefix. Callers pass a "/"-terminated
+	// prefix naming a logical directory (e.g. "chunks/"); under that convention
+	// the filesystem and S3 backends enumerate identically.
 	list(prefix string) ([]objectInfo, error)
 }
 
@@ -83,15 +85,30 @@ func (b *localBackend) get(key string) ([]byte, error) {
 
 func (b *localBackend) put(key string, data []byte) error {
 	dst := b.path(key)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	// Write to a temp file and rename so a reader never sees a partial object.
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// Write to a uniquely-named temp file and rename it into place, so a reader
+	// never sees a partial object and two concurrent writers can't clobber one
+	// another's temp. The "*.tmp" suffix keeps it out of list() results.
+	tmp, err := os.CreateTemp(dir, "*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, dst)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // harmless no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, dst)
 }
 
 func (b *localBackend) exists(key string) (bool, error) {

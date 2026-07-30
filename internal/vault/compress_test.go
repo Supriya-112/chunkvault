@@ -86,6 +86,24 @@ func TestIncompressibleStoredRaw(t *testing.T) {
 	}
 }
 
+// TestGzipDecompressionBounded confirms an over-large gzip chunk is rejected
+// rather than inflated without limit.
+func TestGzipDecompressionBounded(t *testing.T) {
+	defer func(orig int64) { maxDecompressedChunk = orig }(maxDecompressedChunk)
+	maxDecompressedChunk = 100
+
+	encoded, err := encodeChunk(Gzip, make([]byte, 10_000)) // zeros compress tiny, inflate past the cap
+	if err != nil {
+		t.Fatalf("encodeChunk: %v", err)
+	}
+	if Codec(encoded[0]) != Gzip {
+		t.Fatalf("expected a gzip-encoded chunk, got codec %d", encoded[0])
+	}
+	if _, err := decodeChunk(encoded); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("expected a decompression-limit error, got %v", err)
+	}
+}
+
 func TestDecodeChunkRejectsGarbage(t *testing.T) {
 	if _, err := decodeChunk(nil); err == nil {
 		t.Error("decodeChunk should reject an empty chunk")

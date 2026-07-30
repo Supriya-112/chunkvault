@@ -66,7 +66,7 @@ var backupCmd = &cobra.Command{
 		}
 		fmt.Fprintf(out, "  chunks:  %d total, %d new\n", res.TotalChunks, res.NewChunks)
 		fmt.Fprintf(out, "  data:    %s scanned, %s stored (%.0f%% smaller)\n",
-			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), res.ReductionRatio()*100)
+			humanBytes(res.TotalBytes), humanBytes(res.StoredBytes), nonNegRatio(res.ReductionRatio())*100)
 		if len(passphrase) > 0 {
 			fmt.Fprintf(out, "  encrypted: yes (XChaCha20-Poly1305)\n")
 		}
@@ -84,6 +84,24 @@ func init() {
 	backupCmd.Flags().BoolVar(&backupEncrypt, "encrypt", false, "create an encrypted vault (prompts for a passphrase)")
 	backupCmd.Flags().StringVar(&backupPassphraseFile, "passphrase-file", "", "read the vault passphrase from this file")
 	rootCmd.AddCommand(backupCmd)
+}
+
+// nonNeg / nonNegRatio clamp a savings figure at zero: on incompressible data
+// the per-chunk header (and, when encrypted, the nonce+tag) can make stored
+// bytes marginally exceed logical bytes, which would otherwise print as a
+// confusing negative "saved" / "-0% smaller".
+func nonNeg(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func nonNegRatio(r float64) float64 {
+	if r < 0 {
+		return 0
+	}
+	return r
 }
 
 // humanBytes formats a byte count in a human-readable form (e.g. 1.5 MiB).

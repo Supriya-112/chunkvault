@@ -106,8 +106,11 @@ type ProgressSnapshot struct {
 	Current                  string
 }
 
-// Snapshot returns the current counters.
+// Snapshot returns the current counters. It is safe to call on a nil *Progress.
 func (p *Progress) Snapshot() ProgressSnapshot {
+	if p == nil {
+		return ProgressSnapshot{}
+	}
 	p.mu.Lock()
 	cur := p.current
 	p.mu.Unlock()

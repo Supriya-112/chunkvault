@@ -11,9 +11,6 @@ import (
 // TestBackupRestoreEncryptedCLI drives an encrypted backup -> stats -> restore
 // through the CLI, supplying the passphrase via the environment.
 func TestBackupRestoreEncryptedCLI(t *testing.T) {
-	// --encrypt is a package-level flag var reused across runCmd calls; reset it
-	// so it does not leak into later tests.
-	t.Cleanup(func() { backupEncrypt = false })
 	t.Setenv("CHUNKVAULT_PASSPHRASE", "cli-secret")
 
 	src := t.TempDir()
@@ -49,8 +46,21 @@ func TestBackupRestoreEncryptedCLI(t *testing.T) {
 	}
 }
 
+// TestBackupEncryptEmptyPassphraseRejected guards the regression where an empty
+// CHUNKVAULT_PASSPHRASE made `backup --encrypt` silently create a plaintext
+// vault instead of erroring.
+func TestBackupEncryptEmptyPassphraseRejected(t *testing.T) {
+	t.Setenv("CHUNKVAULT_PASSPHRASE", "")
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCmd("backup", src, "--vault", t.TempDir(), "--encrypt"); err == nil {
+		t.Fatal("expected --encrypt with an empty passphrase to fail, not create a plaintext vault")
+	}
+}
+
 func TestRestoreEncryptedWrongPassphraseCLI(t *testing.T) {
-	t.Cleanup(func() { backupEncrypt = false })
 	t.Setenv("CHUNKVAULT_PASSPHRASE", "right-one")
 
 	src := t.TempDir()

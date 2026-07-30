@@ -54,15 +54,20 @@ func ParseCodec(s string) (Codec, error) {
 	}
 }
 
+// maxDecompressedChunk bounds how large a single chunk may inflate to on read.
+// A real chunk is at most a few MiB (the chunker caps chunks at avgSize*4); this
+// far-larger ceiling exists only so a hostile or corrupted vault cannot make a
+// tiny chunk decompress into gigabytes and exhaust memory before the integrity
+// check runs. It is a var so tests can lower it. (Both codecs are bounded: gzip
+// via an io.LimitReader below, zstd via the decoder's max-memory option.)
+var maxDecompressedChunk int64 = 512 << 20
+
 // A single shared encoder and decoder is the intended way to use this zstd
 // package: both are safe for concurrent use, so the backup worker pool can hash
 // and store chunks in parallel without one per goroutine.
 var (
 	zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-	// A generous memory bound guards against a hostile vault decompressing into
-	// far more memory than any real chunk; content is still checked against its
-	// hash after decoding, so this only limits the blast radius.
-	zstdDecoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(512<<20))
+	zstdDecoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(uint64(maxDecompressedChunk)))
 )
 
 // encodeChunk returns the on-disk representation of data under codec c: a
@@ -130,9 +135,14 @@ func decompress(c Codec, payload []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		out, err := io.ReadAll(r)
+		// Read one byte past the ceiling so an over-large payload is detectable
+		// rather than silently truncated.
+		out, err := io.ReadAll(io.LimitReader(r, maxDecompressedChunk+1))
 		if err != nil {
 			return nil, err
+		}
+		if int64(len(out)) > maxDecompressedChunk {
+			return nil, fmt.Errorf("gzip chunk exceeds the %d-byte decompression limit", maxDecompressedChunk)
 		}
 		if err := r.Close(); err != nil {
 			return nil, err

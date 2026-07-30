@@ -74,8 +74,15 @@ func openStore(location string, passphrase []byte, create bool) (*Store, error) 
 	case len(passphrase) != 0:
 		// The vault has no encryption. Turning a brand-new vault into an
 		// encrypted one is fine; adding a passphrase to one that already holds
-		// data is not.
-		if !create || established(be) {
+		// data is not. Fail closed if we cannot tell whether it is established.
+		if !create {
+			return nil, ErrNotEncrypted
+		}
+		has, err := established(be)
+		if err != nil {
+			return nil, err
+		}
+		if has {
 			return nil, ErrNotEncrypted
 		}
 		newCfg, enc, err := newEncryptedConfig(passphrase)
@@ -92,18 +99,19 @@ func openStore(location string, passphrase []byte, create bool) (*Store, error) 
 
 // established reports whether a vault already holds at least one snapshot, so a
 // passphrase cannot be used to "encrypt" a vault that already has plaintext data
-// in it.
-func established(be backend) bool {
+// in it. It returns an error rather than a guess when the store can't be listed,
+// so the caller fails closed instead of clobbering existing data.
+func established(be backend) (bool, error) {
 	objs, err := be.list("snapshots/")
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, o := range objs {
 		if strings.HasSuffix(o.key, ".json") {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // chunkKey is the storage key for a chunk, sharding by the first two characters
@@ -135,6 +143,7 @@ func (s *Store) chunkID(data []byte) string {
 // writes any given chunk.
 func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err error) {
 	id = s.chunkID(data)
+	claim := id // id is a named return the error paths overwrite; capture the key to release.
 
 	s.mu.Lock()
 	if s.seen[id] {
@@ -150,7 +159,7 @@ func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err e
 	defer func() {
 		if err != nil {
 			s.mu.Lock()
-			delete(s.seen, id)
+			delete(s.seen, claim)
 			s.mu.Unlock()
 		}
 	}()

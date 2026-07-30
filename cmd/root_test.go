@@ -5,11 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
+// resetFlags restores every flag on cmd and its subcommands to its default,
+// since Cobra reuses the shared rootCmd across runCmd calls and does not reset a
+// flag that is absent from a given invocation — otherwise a value set by one
+// test would silently leak into later ones.
+func resetFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+	for _, sub := range cmd.Commands() {
+		resetFlags(sub)
+	}
+}
+
 // runCmd executes the root command with the given args, capturing output,
-// and returns any error. It resets output routing so tests don't leak to stderr.
+// and returns any error. It resets flags and output routing so each invocation
+// starts clean and tests don't leak to stderr.
 func runCmd(args ...string) (string, error) {
+	resetFlags(rootCmd)
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -80,10 +99,6 @@ func TestBackupCompressFlag(t *testing.T) {
 }
 
 func TestBackupRejectsUnknownCompress(t *testing.T) {
-	// The flag var is shared across runCmd calls, so restore the default once
-	// this test has poked in an invalid value.
-	defer func() { backupCompress = "zstd" }()
-
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

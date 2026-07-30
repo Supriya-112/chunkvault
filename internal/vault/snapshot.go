@@ -74,5 +74,11 @@ func (s *Store) LoadSnapshot(id string) (*Snapshot, error) {
 	if err := json.Unmarshal(data, &snap); err != nil {
 		return nil, fmt.Errorf("parsing snapshot %q: %w", id, err)
 	}
+	// Bind the manifest to the ID it was requested under, so a snapshot object
+	// that was swapped or rolled back under a different name is detected rather
+	// than silently restored (chunks get the same protection via their ID).
+	if snap.ID != id {
+		return nil, fmt.Errorf("snapshot %q has mismatched id %q", id, snap.ID)
+	}
 	return &snap, nil
 }

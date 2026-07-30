@@ -53,10 +53,12 @@ func runWithProgress(cmd *cobra.Command, title, op string, prog *vault.Progress,
 	_, perr := p.Run()
 	cancel() // if the user quit the view, stop the op too
 	opErr := <-errc
-	if perr != nil {
-		return perr
+	// The operation's result is authoritative: a completed backup/verify must
+	// not be reported as failed just because the display had a render error.
+	if opErr != nil {
+		return opErr
 	}
-	return opErr
+	return perr
 }
 
 type tickMsg time.Time

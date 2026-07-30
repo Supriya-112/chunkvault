@@ -55,7 +55,10 @@ func (s *Store) verifyOne(ctx context.Context, snapshotID string, workers int, q
 	}
 	rep.Snapshots = 1
 
-	missing, present := s.partitionByPresence(uniqueRefs(snap))
+	missing, present, err := s.partitionByPresence(uniqueRefs(snap))
+	if err != nil {
+		return err
+	}
 	rep.Missing = missing
 	rep.Chunks = len(present)
 	progress.setTotal(int64(len(present)))
@@ -194,17 +197,23 @@ func (s *Store) listChunkIDs() ([]string, error) {
 }
 
 // partitionByPresence splits chunk IDs into those absent from and those present
-// in the store. The missing list is sorted for stable reporting.
-func (s *Store) partitionByPresence(ids []string) (missing, present []string) {
+// in the store. A backend error (as opposed to a genuine absence) is returned,
+// so a transient failure is not misreported as a missing chunk. The missing list
+// is sorted for stable reporting.
+func (s *Store) partitionByPresence(ids []string) (missing, present []string, err error) {
 	for _, id := range ids {
-		if ok, err := s.backend.exists(chunkKey(id)); ok && err == nil {
+		ok, err := s.backend.exists(chunkKey(id))
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
 			present = append(present, id)
 		} else {
 			missing = append(missing, id)
 		}
 	}
 	sort.Strings(missing)
-	return missing, present
+	return missing, present, nil
 }
 
 // uniqueRefs returns the distinct chunk IDs a snapshot references, in first-seen

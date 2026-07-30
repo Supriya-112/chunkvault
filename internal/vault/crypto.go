@@ -192,8 +192,9 @@ func saveConfig(be backend, cfg *vaultConfig) error {
 }
 
 // IsEncrypted reports whether the vault at location is encrypted, so a caller
-// can decide up front whether it needs to collect a passphrase. A location that
-// does not exist yet is reported as not encrypted (no error).
+// can decide up front whether it needs to collect a passphrase. A local path
+// that does not exist yet, or an existing bucket with no config, is reported as
+// not encrypted (no error); an unreachable S3 bucket surfaces as an error.
 func IsEncrypted(location string) (bool, error) {
 	be, err := newBackend(location)
 	if err != nil {

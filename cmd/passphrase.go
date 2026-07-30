@@ -34,6 +34,9 @@ func passphraseForVault(cmd *cobra.Command, vaultDir, passphraseFile string) ([]
 // vault is being created, so the user re-types the passphrase they are setting.
 func vaultPassphrase(cmd *cobra.Command, passphraseFile string, needConfirm bool) ([]byte, error) {
 	if v, ok := os.LookupEnv(passphraseEnv); ok {
+		if v == "" {
+			return nil, fmt.Errorf("%s is set but empty", passphraseEnv)
+		}
 		return []byte(v), nil
 	}
 	if passphraseFile != "" {
@@ -41,7 +44,11 @@ func vaultPassphrase(cmd *cobra.Command, passphraseFile string, needConfirm bool
 		if err != nil {
 			return nil, fmt.Errorf("reading passphrase file: %w", err)
 		}
-		return []byte(strings.TrimRight(string(data), "\r\n")), nil
+		pw := strings.TrimRight(string(data), "\r\n")
+		if pw == "" {
+			return nil, fmt.Errorf("passphrase file %q is empty", passphraseFile)
+		}
+		return []byte(pw), nil
 	}
 	return promptPassphrase(cmd, needConfirm)
 }
