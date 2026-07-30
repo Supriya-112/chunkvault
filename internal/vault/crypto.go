@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -167,11 +165,11 @@ func openEncryptor(cfg *vaultConfig, passphrase []byte) (*encryptor, error) {
 	return enc, nil
 }
 
-// loadConfig reads a vault's config file, returning (nil, nil) when the vault
-// has none (an unencrypted vault, including those from before M10).
-func loadConfig(root string) (*vaultConfig, error) {
-	data, err := os.ReadFile(filepath.Join(root, configName))
-	if errors.Is(err, os.ErrNotExist) {
+// loadConfig reads a vault's config, returning (nil, nil) when the vault has
+// none (an unencrypted vault, including those from before M10).
+func loadConfig(be backend) (*vaultConfig, error) {
+	data, err := be.get(configName)
+	if errors.Is(err, errNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -184,19 +182,24 @@ func loadConfig(root string) (*vaultConfig, error) {
 	return &cfg, nil
 }
 
-// saveConfig writes a vault's config file.
-func saveConfig(root string, cfg *vaultConfig) error {
+// saveConfig writes a vault's config.
+func saveConfig(be backend, cfg *vaultConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, configName), data, 0o600)
+	return be.put(configName, data)
 }
 
-// IsEncrypted reports whether the vault at vaultDir is encrypted, so a caller
-// can decide up front whether it needs to collect a passphrase.
-func IsEncrypted(vaultDir string) (bool, error) {
-	cfg, err := loadConfig(vaultDir)
+// IsEncrypted reports whether the vault at location is encrypted, so a caller
+// can decide up front whether it needs to collect a passphrase. A location that
+// does not exist yet is reported as not encrypted (no error).
+func IsEncrypted(location string) (bool, error) {
+	be, err := newBackend(location)
+	if err != nil {
+		return false, err
+	}
+	cfg, err := loadConfig(be)
 	if err != nil {
 		return false, err
 	}

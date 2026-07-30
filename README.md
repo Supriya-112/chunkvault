@@ -34,6 +34,9 @@ behind modern deduplicating backup systems:
 - **Encryption at rest** — an optional passphrase (Argon2id → XChaCha20-Poly1305)
   encrypts every chunk and manifest, and names chunks by a keyed HMAC so even the
   file names on disk reveal nothing about their contents.
+- **Pluggable storage** — keep the vault on the local filesystem or in S3, by
+  pointing `--vault` at a path or an `s3://bucket/prefix` URL. The S3 backend
+  works with any S3-compatible service (MinIO, Cloudflare R2, Backblaze B2).
 
 ## Install
 
@@ -71,6 +74,14 @@ chunkvault backup ./my-documents --vault ./secure --encrypt
 # passphrase automatically — no need to repeat --encrypt.
 export CHUNKVAULT_PASSPHRASE=...        # for scripts and CI
 chunkvault restore <snapshot-id> ./restored --vault ./secure
+
+# Store the vault in S3 (or any S3-compatible service). Credentials come from
+# the standard AWS environment; --s3-endpoint / --s3-region target other services.
+export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...
+chunkvault backup ./my-documents --vault s3://my-bucket/backups
+chunkvault restore <snapshot-id> ./restored --vault s3://my-bucket/backups
+chunkvault backup ./data --vault s3://my-bucket/backups \
+  --s3-endpoint http://localhost:9000 --s3-region us-east-1   # e.g. MinIO
 
 # Restore a snapshot into a target directory
 chunkvault restore <snapshot-id> ./restored
@@ -129,6 +140,22 @@ encrypted at rest:
 the timing of snapshots are still observable from the vault directory. There is
 no key rotation or passphrase change yet, and security rests on the strength of
 your passphrase. Lose the passphrase and the data is unrecoverable — by design.
+
+## Storage backends
+
+A vault is addressed by the `--vault` flag, and the storage lives behind a small
+backend interface (`get` / `put` / `exists` / `list` by key):
+
+- **Local** (default) — `--vault ./path` stores the vault as files on disk.
+- **S3** — `--vault s3://bucket/prefix` stores each chunk and manifest as an
+  object. Everything else (chunking, dedup, compression, encryption) is
+  identical; only where the bytes land changes.
+
+Credentials are read from the standard AWS environment
+(`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or `~/.aws/credentials`). The
+region and endpoint default to AWS but can point at any S3-compatible service
+with `--s3-region` / `--s3-endpoint` (or `AWS_REGION` / `AWS_ENDPOINT_URL`). The
+bucket must already exist — chunkvault never creates buckets.
 
 ## Progress view
 
@@ -192,7 +219,7 @@ for space — pass `--compress none` when the source is already compressed
 - [x] **M10** Encryption at rest (Argon2id + XChaCha20-Poly1305, keyed-HMAC names)
 - [x] **M11** `verify` (whole-vault or per-snapshot integrity check, concurrent)
 - [x] **M12** TUI progress view (live bar for backup + verify, Bubble Tea)
-- [ ] **M13** Remote (S3) backend
+- [x] **M13** Remote (S3) backend (pluggable local / S3-compatible storage)
 
 ## License
 

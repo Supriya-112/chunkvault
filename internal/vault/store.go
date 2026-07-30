@@ -1,47 +1,46 @@
-// Package vault implements the on-disk chunk store, snapshot format, and the
-// backup operation that ties them together.
+// Package vault implements the chunk store, snapshot format, and the backup
+// operation that ties them together.
 //
-// Layout on disk:
+// Storage sits behind a backend (see backend.go): a flat namespace of keys that
+// is served by either the local filesystem or S3. The vault layout is:
 //
-//	<vault>/
-//	  config.json                 present only for encrypted vaults (KDF + verifier)
-//	  chunks/<aa>/<full-id>        one file per unique chunk, named by its ID
-//	  snapshots/<id>.json          a manifest of files and their chunk IDs
+//	config.json                 present only for encrypted vaults (KDF + verifier)
+//	chunks/<aa>/<full-id>        one object per unique chunk, named by its ID
+//	snapshots/<id>.json          a manifest of files and their chunk IDs
 //
 // A chunk's ID is the SHA-256 of its contents for an unencrypted vault, or an
 // HMAC of its contents (keyed by a passphrase-derived key) for an encrypted
-// one, so encrypted vaults never expose plaintext hashes as file names.
+// one, so encrypted vaults never expose plaintext hashes as key names.
 package vault
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
 
-// Store is a content-addressable chunk store rooted at a directory. It is safe
-// for concurrent use by multiple goroutines.
+// Store is a content-addressable chunk store over a backend. It is safe for
+// concurrent use by multiple goroutines.
 type Store struct {
-	root  string
-	codec Codec      // compression applied to newly written chunks; reads honour each chunk's own tag
-	enc   *encryptor // non-nil for an encrypted vault; encrypts chunks and manifests and keys chunk IDs
+	backend backend
+	codec   Codec      // compression applied to newly written chunks; reads honour each chunk's own tag
+	enc     *encryptor // non-nil for an encrypted vault; encrypts chunks and manifests and keys chunk IDs
 
 	mu   sync.Mutex
-	seen map[string]bool // chunk IDs known to be stored, so concurrent PutChunk calls write each chunk once
+	seen map[string]bool // chunk IDs claimed for writing, so concurrent PutChunk calls write each chunk once
 }
 
-// Open opens (creating if needed) an unencrypted vault at root. It is a thin
+// Open opens (creating if needed) an unencrypted vault at location. It is a thin
 // wrapper over openStore for callers that never use encryption.
-func Open(root string) (*Store, error) {
-	return openStore(root, nil, true)
+func Open(location string) (*Store, error) {
+	return openStore(location, nil, true)
 }
 
-// openStore opens a vault at root, creating it when create is true. Encryption
-// is resolved from the vault's config and the supplied passphrase:
+// openStore opens a vault at location, creating it when create is true.
+// Encryption is resolved from the vault's config and the supplied passphrase:
 //
 //   - encrypted vault  → a correct passphrase is required (else an error)
 //   - unencrypted vault → no passphrase is expected
@@ -49,25 +48,20 @@ func Open(root string) (*Store, error) {
 //
 // A passphrase given for an established unencrypted vault is refused rather
 // than silently ignored.
-func openStore(root string, passphrase []byte, create bool) (*Store, error) {
-	// When not creating, the vault root must already exist, so a mistyped path
-	// is reported instead of silently treated as an empty vault.
-	if !create {
-		if _, err := os.Stat(root); err != nil {
-			return nil, fmt.Errorf("vault %q: %w", root, err)
-		}
-	}
-	for _, sub := range []string{"chunks", "snapshots"} {
-		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
-			return nil, fmt.Errorf("creating %s: %w", sub, err)
-		}
-	}
-
-	cfg, err := loadConfig(root)
+func openStore(location string, passphrase []byte, create bool) (*Store, error) {
+	be, err := newBackend(location)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{root: root, seen: map[string]bool{}}
+	if err := be.open(create); err != nil {
+		return nil, err
+	}
+
+	cfg, err := loadConfig(be)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{backend: be, seen: map[string]bool{}}
 
 	switch {
 	case cfg != nil && cfg.KDF != nil:
@@ -81,14 +75,14 @@ func openStore(root string, passphrase []byte, create bool) (*Store, error) {
 		// The vault has no encryption. Turning a brand-new vault into an
 		// encrypted one is fine; adding a passphrase to one that already holds
 		// data is not.
-		if !create || established(root) {
+		if !create || established(be) {
 			return nil, ErrNotEncrypted
 		}
 		newCfg, enc, err := newEncryptedConfig(passphrase)
 		if err != nil {
 			return nil, err
 		}
-		if err := saveConfig(root, newCfg); err != nil {
+		if err := saveConfig(be, newCfg); err != nil {
 			return nil, err
 		}
 		s.enc = enc
@@ -97,25 +91,25 @@ func openStore(root string, passphrase []byte, create bool) (*Store, error) {
 }
 
 // established reports whether a vault already holds at least one snapshot, so a
-// passphrase cannot be used to "encrypt" a vault that already has plaintext
-// data in it.
-func established(root string) bool {
-	entries, err := os.ReadDir(filepath.Join(root, "snapshots"))
+// passphrase cannot be used to "encrypt" a vault that already has plaintext data
+// in it.
+func established(be backend) bool {
+	objs, err := be.list("snapshots/")
 	if err != nil {
 		return false
 	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+	for _, o := range objs {
+		if strings.HasSuffix(o.key, ".json") {
 			return true
 		}
 	}
 	return false
 }
 
-// chunkPath returns the on-disk path for a chunk, sharding by the first two
-// characters of its ID to avoid huge single directories.
-func (s *Store) chunkPath(id string) string {
-	return filepath.Join(s.root, "chunks", id[:2], id)
+// chunkKey is the storage key for a chunk, sharding by the first two characters
+// of its ID to avoid one enormous directory or prefix.
+func chunkKey(id string) string {
+	return "chunks/" + id[:2] + "/" + id
 }
 
 // chunkID is the content address of data: an HMAC keyed by the vault's naming
@@ -129,35 +123,30 @@ func (s *Store) chunkID(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// PutChunk stores data under its content ID and returns that ID. The ID is
-// taken over the uncompressed plaintext (see chunkID), so deduplication is
-// unaffected by compression or encryption. wasNew is false when the chunk
-// already existed — a deduplication hit — and stored is the number of bytes
-// actually written to disk (0 on a dedup hit). The write is atomic: content
-// goes to a temp file that is renamed into place.
+// PutChunk stores data under its content ID and returns that ID. The ID is taken
+// over the uncompressed plaintext (see chunkID), so deduplication is unaffected
+// by compression or encryption. wasNew is false when the chunk already existed —
+// a deduplication hit — and stored is the number of bytes written (0 on a dedup
+// hit).
 //
-// Each chunk is compressed and then, for an encrypted vault, encrypted before
-// it is written. It is safe to call concurrently: a chunk is claimed under a
-// lock before the write, so exactly one caller writes any given chunk.
+// Each chunk is compressed and then, for an encrypted vault, encrypted before it
+// is written. It is safe to call concurrently: a chunk is claimed under a lock
+// before the (possibly remote) existence check and write, so exactly one caller
+// writes any given chunk.
 func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err error) {
 	id = s.chunkID(data)
-	dst := s.chunkPath(id)
 
 	s.mu.Lock()
 	if s.seen[id] {
 		s.mu.Unlock()
 		return id, false, 0, nil // another chunk with this content already handled it
 	}
-	if _, statErr := os.Stat(dst); statErr == nil {
-		s.seen[id] = true
-		s.mu.Unlock()
-		return id, false, 0, nil // already on disk from a previous run — dedup
-	}
 	s.seen[id] = true // claim it; we are the one writer
 	s.mu.Unlock()
 
-	// The write happens outside the lock so chunks store in parallel. On
-	// failure the claim is released so a retry can store the chunk.
+	// Release the claim on failure so a retry can store the chunk. The claim is
+	// held across the existence check and write, which run outside the lock so
+	// chunks store in parallel.
 	defer func() {
 		if err != nil {
 			s.mu.Lock()
@@ -165,6 +154,15 @@ func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err e
 			s.mu.Unlock()
 		}
 	}()
+
+	key := chunkKey(id)
+	present, err := s.backend.exists(key)
+	if err != nil {
+		return "", false, 0, err
+	}
+	if present {
+		return id, false, 0, nil // already stored from a previous run — dedup
+	}
 
 	blob, err := encodeChunk(s.codec, data)
 	if err != nil {
@@ -175,14 +173,7 @@ func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err e
 			return "", false, 0, err
 		}
 	}
-	if err = os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", false, 0, err
-	}
-	tmp := dst + ".tmp"
-	if err = os.WriteFile(tmp, blob, 0o644); err != nil {
-		return "", false, 0, err
-	}
-	if err = os.Rename(tmp, dst); err != nil {
+	if err = s.backend.put(key, blob); err != nil {
 		return "", false, 0, err
 	}
 	return id, true, len(blob), nil
@@ -190,11 +181,11 @@ func (s *Store) PutChunk(data []byte) (id string, wasNew bool, stored int, err e
 
 // GetChunk returns the original contents of the chunk with the given ID,
 // decrypting it (for an encrypted vault) and decompressing it. It verifies that
-// the recovered bytes reproduce the ID the chunk is stored under, so a
-// corrupted, tampered, or undecodable chunk is reported as an integrity failure
-// rather than restored.
+// the recovered bytes reproduce the ID the chunk is stored under, so a corrupted,
+// tampered, or undecodable chunk is reported as an integrity failure rather than
+// restored.
 func (s *Store) GetChunk(id string) ([]byte, error) {
-	raw, err := os.ReadFile(s.chunkPath(id))
+	raw, err := s.backend.get(chunkKey(id))
 	if err != nil {
 		return nil, err
 	}
@@ -214,18 +205,21 @@ func (s *Store) GetChunk(id string) ([]byte, error) {
 	return data, nil
 }
 
-// ListSnapshots returns the IDs of every snapshot in the vault, sorted.
+// ListSnapshots returns the IDs of every snapshot in the vault, sorted oldest
+// first (IDs lead with a timestamp, so a lexical sort is chronological).
 func (s *Store) ListSnapshots() ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(s.root, "snapshots"))
+	objs, err := s.backend.list("snapshots/")
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+	for _, o := range objs {
+		name := strings.TrimPrefix(o.key, "snapshots/")
+		if strings.Contains(name, "/") || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		ids = append(ids, strings.TrimSuffix(e.Name(), ".json"))
+		ids = append(ids, strings.TrimSuffix(name, ".json"))
 	}
+	sort.Strings(ids)
 	return ids, nil
 }

@@ -1,11 +1,5 @@
 package vault
 
-import (
-	"io/fs"
-	"path/filepath"
-	"strings"
-)
-
 // Stats summarizes a vault: how much data has been backed up across all
 // snapshots versus how much is actually stored after deduplication.
 type Stats struct {
@@ -42,24 +36,13 @@ func ComputeStats(vaultDir string, passphrase []byte) (*Stats, error) {
 	}
 
 	var st Stats
-	chunksRoot := filepath.Join(store.root, "chunks")
-	err = filepath.WalkDir(chunksRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || strings.HasSuffix(path, ".tmp") {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		st.UniqueChunks++
-		st.StoredBytes += info.Size()
-		return nil
-	})
+	chunks, err := store.backend.list("chunks/")
 	if err != nil {
 		return nil, err
+	}
+	for _, c := range chunks {
+		st.UniqueChunks++
+		st.StoredBytes += c.size
 	}
 
 	ids, err := store.ListSnapshots()

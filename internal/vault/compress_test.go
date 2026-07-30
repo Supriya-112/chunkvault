@@ -2,7 +2,6 @@ package vault
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
@@ -139,7 +138,7 @@ func TestGetChunkDetectsCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
-	if err := os.WriteFile(store.chunkPath(hash), []byte("corrupted"), 0o644); err != nil {
+	if err := store.backend.put(chunkKey(hash), []byte("corrupted")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.GetChunk(hash); err == nil || !strings.Contains(err.Error(), "integrity") {

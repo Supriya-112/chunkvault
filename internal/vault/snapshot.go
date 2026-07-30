@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -57,15 +55,13 @@ func (s *Store) SaveSnapshot(snap *Snapshot) error {
 			return err
 		}
 	}
-	path := filepath.Join(s.root, "snapshots", snap.ID+".json")
-	return os.WriteFile(path, data, 0o644)
+	return s.backend.put("snapshots/"+snap.ID+".json", data)
 }
 
 // LoadSnapshot reads a snapshot manifest by its ID, decrypting it first when
 // the vault is encrypted.
 func (s *Store) LoadSnapshot(id string) (*Snapshot, error) {
-	path := filepath.Join(s.root, "snapshots", id+".json")
-	data, err := os.ReadFile(path)
+	data, err := s.backend.get("snapshots/" + id + ".json")
 	if err != nil {
 		return nil, fmt.Errorf("loading snapshot %q: %w", id, err)
 	}

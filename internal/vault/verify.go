@@ -2,9 +2,6 @@ package vault
 
 import (
 	"context"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -185,28 +182,25 @@ func (s *Store) verifyChunks(ctx context.Context, ids []string, workers int, pro
 
 // listChunkIDs returns the ID of every chunk stored in the vault.
 func (s *Store) listChunkIDs() ([]string, error) {
-	var ids []string
-	err := filepath.WalkDir(filepath.Join(s.root, "chunks"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || strings.HasSuffix(path, ".tmp") {
-			return nil
-		}
-		ids = append(ids, filepath.Base(path))
-		return nil
-	})
-	return ids, err
+	objs, err := s.backend.list("chunks/")
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(objs))
+	for _, o := range objs {
+		ids = append(ids, o.key[strings.LastIndex(o.key, "/")+1:])
+	}
+	return ids, nil
 }
 
 // partitionByPresence splits chunk IDs into those absent from and those present
 // in the store. The missing list is sorted for stable reporting.
 func (s *Store) partitionByPresence(ids []string) (missing, present []string) {
 	for _, id := range ids {
-		if _, err := os.Stat(s.chunkPath(id)); err != nil {
-			missing = append(missing, id)
-		} else {
+		if ok, err := s.backend.exists(chunkKey(id)); ok && err == nil {
 			present = append(present, id)
+		} else {
+			missing = append(missing, id)
 		}
 	}
 	sort.Strings(missing)
