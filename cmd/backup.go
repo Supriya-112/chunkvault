@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -41,8 +42,19 @@ var backupCmd = &cobra.Command{
 			}
 		}
 
-		res, err := vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers,
-			vault.Options{Compression: codec, Passphrase: passphrase})
+		opts := vault.Options{Compression: codec, Passphrase: passphrase}
+		var res *vault.Result
+		if progressEnabled() {
+			prog := vault.NewProgress()
+			opts.Progress = prog
+			err = runWithProgress(cmd, "Backing up "+args[0], "backup", prog, func(ctx context.Context) error {
+				var e error
+				res, e = vault.Backup(ctx, args[0], backupVault, 0, backupWorkers, opts)
+				return e
+			})
+		} else {
+			res, err = vault.Backup(cmd.Context(), args[0], backupVault, 0, backupWorkers, opts)
+		}
 		if err != nil {
 			return err
 		}

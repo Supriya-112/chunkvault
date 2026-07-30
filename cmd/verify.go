@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -37,7 +38,21 @@ reading their contents. The command exits non-zero if any problem is found.`,
 			snapID = args[0]
 		}
 
-		rep, err := vault.Verify(cmd.Context(), verifyVault, snapID, passphrase, verifyWorkers, verifyQuick)
+		var rep *vault.VerifyReport
+		if progressEnabled() {
+			prog := vault.NewProgress()
+			title := "Verifying vault"
+			if snapID != "" {
+				title = "Verifying snapshot " + snapID
+			}
+			err = runWithProgress(cmd, title, "verify", prog, func(ctx context.Context) error {
+				var e error
+				rep, e = vault.Verify(ctx, verifyVault, snapID, passphrase, verifyWorkers, verifyQuick, prog)
+				return e
+			})
+		} else {
+			rep, err = vault.Verify(cmd.Context(), verifyVault, snapID, passphrase, verifyWorkers, verifyQuick, nil)
+		}
 		if err != nil {
 			return err
 		}

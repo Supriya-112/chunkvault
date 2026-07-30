@@ -14,8 +14,9 @@ import (
 
 // Options configures a backup run.
 type Options struct {
-	Compression Codec  // codec applied to newly written chunks
-	Passphrase  []byte // non-empty opens an encrypted vault, or creates one if the vault is new
+	Compression Codec     // codec applied to newly written chunks
+	Passphrase  []byte    // non-empty opens an encrypted vault, or creates one if the vault is new
+	Progress    *Progress // optional live counters for a progress view; nil disables tracking
 }
 
 // Result summarizes a completed backup run.
@@ -76,6 +77,12 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	}
 	store.codec = opts.Compression
 
+	// A quick stat-only pre-walk gives the progress bar a denominator. It is
+	// best-effort: the real walk below reports any errors.
+	if opts.Progress != nil {
+		opts.Progress.setTotal(totalRegularBytes(sourceDir))
+	}
+
 	// A local cancellable context so a store error in one worker stops the rest.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -117,7 +124,7 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 
 	// The producer walks the tree, records file and directory metadata into
 	// snap in walk order, and feeds each file's chunks into the pool.
-	prod := &producer{ctx: ctx, jobs: jobs, source: sourceDir, chunkSize: chunkSize, snap: snap, parent: parent}
+	prod := &producer{ctx: ctx, jobs: jobs, source: sourceDir, chunkSize: chunkSize, snap: snap, parent: parent, progress: opts.Progress}
 	produceErr := make(chan error, 1)
 	go func() {
 		defer close(jobs)
@@ -150,6 +157,7 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 			res.NewChunks++
 			res.StoredBytes += int64(r.stored)
 		}
+		opts.Progress.chunkStored(r.wasNew, r.stored)
 	}
 	if perr := <-produceErr; perr != nil && firstErr == nil {
 		firstErr = perr
@@ -179,6 +187,25 @@ func Backup(ctx context.Context, sourceDir, vaultDir string, chunkSize, workers 
 	res.Reused = prod.reused
 	res.Skipped = prod.skipped
 	return res, nil
+}
+
+// totalRegularBytes sums the sizes of the regular files under root, for a
+// progress-bar denominator. It is best-effort and ignores walk errors, which
+// the real backup walk surfaces.
+func totalRegularBytes(root string) int64 {
+	var total int64
+	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.Type().IsRegular() {
+			if info, ierr := d.Info(); ierr == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
 }
 
 // parentIndex returns the files of the most recent snapshot of source, keyed by
@@ -218,6 +245,7 @@ type producer struct {
 	chunkSize int
 	snap      *Snapshot
 	parent    map[string]FileEntry // parent snapshot's files by relative path; nil if none
+	progress  *Progress            // optional live counters; nil disables tracking
 
 	reused  int // files reused unchanged from the parent
 	skipped int // non-regular entries not backed up
@@ -257,6 +285,7 @@ func (p *producer) walk() error {
 			entry.Chunks = append([]string(nil), prev.Chunks...)
 			p.snap.Files = append(p.snap.Files, entry)
 			p.reused++
+			p.progress.reusedFile(rel, entry.Size)
 			return nil
 		}
 
@@ -270,7 +299,7 @@ func (p *producer) walk() error {
 		defer f.Close()
 
 		index := 0
-		return chunk.Split(f, p.chunkSize, func(data []byte) error {
+		if err := chunk.Split(f, p.chunkSize, func(data []byte) error {
 			if err := p.ctx.Err(); err != nil {
 				return err
 			}
@@ -278,6 +307,7 @@ func (p *producer) walk() error {
 			// chunk travels to a worker.
 			buf := make([]byte, len(data))
 			copy(buf, data)
+			p.progress.readBytes(int64(len(data)))
 			select {
 			case p.jobs <- chunkJob{file: fileIdx, index: index, data: buf}:
 				index++
@@ -285,6 +315,10 @@ func (p *producer) walk() error {
 			case <-p.ctx.Done():
 				return p.ctx.Err()
 			}
-		})
+		}); err != nil {
+			return err
+		}
+		p.progress.fileDone(rel)
+		return nil
 	})
 }

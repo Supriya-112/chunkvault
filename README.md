@@ -53,7 +53,9 @@ go build -o chunkvault .
 
 ```bash
 # Back up a directory into the vault (chunks are hashed and stored in parallel;
-# --workers defaults to one per CPU, and Ctrl-C stops the run cleanly)
+# --workers defaults to one per CPU, and Ctrl-C stops the run cleanly).
+# On a terminal, backup and verify show a live progress bar; pass
+# --no-progress (or pipe the output) for plain, script-friendly text.
 chunkvault backup ./my-documents
 chunkvault backup ./my-documents --workers 4
 
@@ -128,6 +130,20 @@ the timing of snapshots are still observable from the vault directory. There is
 no key rotation or passphrase change yet, and security rests on the strength of
 your passphrase. Lose the passphrase and the data is unrecoverable — by design.
 
+## Progress view
+
+On a terminal, `backup` and `verify` render a live progress bar (built with
+[Bubble Tea](https://github.com/charmbracelet/bubbletea)) showing throughput and
+running counts; Ctrl-C cancels cleanly. When output is piped or `--no-progress`
+is set, they print plain, script-friendly text instead.
+
+```
+Backing up ./my-documents   1.2s
+██████████████░░░░░░  68%
+412 MiB / 605 MiB · 1204 files · 3910 chunks (2733 new) · 240 MiB stored
+→ photos/2024/img_0421.jpg
+```
+
 ## Benchmarks
 
 Representative throughput on an Intel Core i5-1038NG7 (4 cores), macOS, Go 1.26.
@@ -175,7 +191,7 @@ for space — pass `--compress none` when the source is already compressed
 - [x] **M9** Compression (per-chunk zstd/gzip, incompressible fallback)
 - [x] **M10** Encryption at rest (Argon2id + XChaCha20-Poly1305, keyed-HMAC names)
 - [x] **M11** `verify` (whole-vault or per-snapshot integrity check, concurrent)
-- [ ] **M12** TUI progress view
+- [x] **M12** TUI progress view (live bar for backup + verify, Bubble Tea)
 - [ ] **M13** Remote (S3) backend
 
 ## License

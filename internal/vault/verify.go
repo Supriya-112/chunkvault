@@ -31,8 +31,9 @@ func (r *VerifyReport) OK() bool {
 // are decrypted, decompressed, and re-hashed to detect bit-rot or tampering;
 // when quick is true only the presence of each referenced chunk is checked.
 // workers <= 0 uses one per CPU. An encrypted vault requires its passphrase.
-// Cancelling ctx aborts a deep check and returns ctx.Err().
-func Verify(ctx context.Context, vaultDir, snapshotID string, passphrase []byte, workers int, quick bool) (*VerifyReport, error) {
+// A non-nil progress receives live counters. Cancelling ctx aborts a deep check
+// and returns ctx.Err().
+func Verify(ctx context.Context, vaultDir, snapshotID string, passphrase []byte, workers int, quick bool, progress *Progress) (*VerifyReport, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -43,14 +44,14 @@ func Verify(ctx context.Context, vaultDir, snapshotID string, passphrase []byte,
 	rep := &VerifyReport{}
 
 	if snapshotID != "" {
-		return rep, store.verifyOne(ctx, snapshotID, workers, quick, rep)
+		return rep, store.verifyOne(ctx, snapshotID, workers, quick, progress, rep)
 	}
-	return rep, store.verifyAll(ctx, workers, quick, rep)
+	return rep, store.verifyAll(ctx, workers, quick, progress, rep)
 }
 
 // verifyOne checks a single snapshot: which of its chunks are missing, and
 // (unless quick) which present ones fail to decode.
-func (s *Store) verifyOne(ctx context.Context, snapshotID string, workers int, quick bool, rep *VerifyReport) error {
+func (s *Store) verifyOne(ctx context.Context, snapshotID string, workers int, quick bool, progress *Progress, rep *VerifyReport) error {
 	snap, err := s.LoadSnapshot(snapshotID)
 	if err != nil {
 		return err
@@ -60,14 +61,16 @@ func (s *Store) verifyOne(ctx context.Context, snapshotID string, workers int, q
 	missing, present := s.partitionByPresence(uniqueRefs(snap))
 	rep.Missing = missing
 	rep.Chunks = len(present)
+	progress.setTotal(int64(len(present)))
 
 	if !quick {
-		corrupt, err := s.verifyChunks(ctx, present, workers)
+		corrupt, err := s.verifyChunks(ctx, present, workers, progress)
 		if err != nil {
 			return err
 		}
 		rep.Corrupt = corrupt
 	}
+	progress.addMissing(len(missing))
 	if len(rep.Missing) > 0 || len(rep.Corrupt) > 0 {
 		rep.Broken = []string{snapshotID}
 	}
@@ -75,12 +78,13 @@ func (s *Store) verifyOne(ctx context.Context, snapshotID string, workers int, q
 }
 
 // verifyAll checks every stored chunk and every snapshot in the vault.
-func (s *Store) verifyAll(ctx context.Context, workers int, quick bool, rep *VerifyReport) error {
+func (s *Store) verifyAll(ctx context.Context, workers int, quick bool, progress *Progress, rep *VerifyReport) error {
 	ids, err := s.listChunkIDs()
 	if err != nil {
 		return err
 	}
 	rep.Chunks = len(ids)
+	progress.setTotal(int64(len(ids)))
 
 	present := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -88,7 +92,7 @@ func (s *Store) verifyAll(ctx context.Context, workers int, quick bool, rep *Ver
 	}
 	corrupt := map[string]bool{}
 	if !quick {
-		bad, err := s.verifyChunks(ctx, ids, workers)
+		bad, err := s.verifyChunks(ctx, ids, workers, progress)
 		if err != nil {
 			return err
 		}
@@ -123,6 +127,7 @@ func (s *Store) verifyAll(ctx context.Context, workers int, quick bool, rep *Ver
 			rep.Broken = append(rep.Broken, sid)
 		}
 	}
+	progress.addMissing(len(missing))
 	rep.Missing = sortedKeys(missing)
 	sort.Strings(rep.Broken)
 	return nil
@@ -130,7 +135,7 @@ func (s *Store) verifyAll(ctx context.Context, workers int, quick bool, rep *Ver
 
 // verifyChunks decodes each chunk across a worker pool and returns the IDs that
 // failed. A corrupt, truncated, or tampered chunk surfaces as a GetChunk error.
-func (s *Store) verifyChunks(ctx context.Context, ids []string, workers int) ([]string, error) {
+func (s *Store) verifyChunks(ctx context.Context, ids []string, workers int, progress *Progress) ([]string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -147,7 +152,9 @@ func (s *Store) verifyChunks(ctx context.Context, ids []string, workers int) ([]
 				if ctx.Err() != nil {
 					continue // draining after cancellation
 				}
-				if _, err := s.GetChunk(id); err != nil {
+				_, err := s.GetChunk(id)
+				progress.chunkChecked(err == nil)
+				if err != nil {
 					mu.Lock()
 					corrupt = append(corrupt, id)
 					mu.Unlock()

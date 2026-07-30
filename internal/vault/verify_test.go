@@ -29,7 +29,7 @@ func backupOneFile(t *testing.T, content []byte, opts Options) (vaultDir, snapID
 func TestVerifyHealthyVault(t *testing.T) {
 	vaultDir, _ := backupOneFile(t, []byte("healthy contents"), Options{Compression: Zstd})
 
-	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false)
+	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestVerifyDetectsCorruptChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false)
+	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestVerifyDetectsMissingChunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false)
+	rep, err := Verify(context.Background(), vaultDir, "", nil, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestVerifyQuickSkipsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	quick, err := Verify(context.Background(), vaultDir, "", nil, 4, true)
+	quick, err := Verify(context.Background(), vaultDir, "", nil, 4, true, nil)
 	if err != nil {
 		t.Fatalf("quick Verify: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestVerifyQuickSkipsContent(t *testing.T) {
 		t.Fatalf("quick verify should not read contents, so it should pass: %+v", quick)
 	}
 
-	deep, err := Verify(context.Background(), vaultDir, "", nil, 4, false)
+	deep, err := Verify(context.Background(), vaultDir, "", nil, 4, false, nil)
 	if err != nil {
 		t.Fatalf("deep Verify: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestVerifyQuickSkipsContent(t *testing.T) {
 func TestVerifySingleSnapshot(t *testing.T) {
 	vaultDir, snapID := backupOneFile(t, []byte("some snapshot data"), Options{Compression: Zstd})
 
-	rep, err := Verify(context.Background(), vaultDir, snapID, nil, 4, false)
+	rep, err := Verify(context.Background(), vaultDir, snapID, nil, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestVerifySingleSnapshot(t *testing.T) {
 		t.Fatalf("single-snapshot verify: %+v", rep)
 	}
 
-	if _, err := Verify(context.Background(), vaultDir, "no-such-snapshot", nil, 4, false); err == nil {
+	if _, err := Verify(context.Background(), vaultDir, "no-such-snapshot", nil, 4, false, nil); err == nil {
 		t.Fatal("verifying a nonexistent snapshot should error")
 	}
 }
@@ -126,7 +126,7 @@ func TestVerifySingleSnapshot(t *testing.T) {
 func TestVerifyEncryptedVault(t *testing.T) {
 	vaultDir, _ := backupOneFile(t, []byte("secret contents"), Options{Compression: Zstd, Passphrase: testPass})
 
-	rep, err := Verify(context.Background(), vaultDir, "", testPass, 4, false)
+	rep, err := Verify(context.Background(), vaultDir, "", testPass, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestVerifyEncryptedVault(t *testing.T) {
 	}
 
 	// Without the passphrase, an encrypted vault cannot be verified.
-	if _, err := Verify(context.Background(), vaultDir, "", nil, 4, false); !errors.Is(err, ErrPassphraseRequired) {
+	if _, err := Verify(context.Background(), vaultDir, "", nil, 4, false, nil); !errors.Is(err, ErrPassphraseRequired) {
 		t.Fatalf("got %v, want ErrPassphraseRequired", err)
 	}
 
@@ -143,7 +143,7 @@ func TestVerifyEncryptedVault(t *testing.T) {
 	if err := os.WriteFile(firstChunkFile(t, vaultDir), []byte("garbage"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rep, err = Verify(context.Background(), vaultDir, "", testPass, 4, false)
+	rep, err = Verify(context.Background(), vaultDir, "", testPass, 4, false, nil)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}

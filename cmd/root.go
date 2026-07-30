@@ -12,6 +12,14 @@ import (
 // version is set at build time via -ldflags, and defaults to "dev".
 var version = "dev"
 
+// noProgress disables the live progress display (also skipped automatically
+// when stdout is not a terminal).
+var noProgress bool
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&noProgress, "no-progress", false, "disable the live progress display")
+}
+
 var rootCmd = &cobra.Command{
 	Use:     "chunkvault",
 	Short:   "A content-addressable, deduplicating backup tool",
